@@ -1,0 +1,41 @@
+# One command to run LoyalFlow with automatic HTTPS:  docker compose up -d
+# Set DOMAIN in .env (e.g. flow.loyalstring.com) and point the DNS A record at the server.
+services:
+  loyalflow:
+    build: .
+    image: loyalflow:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - DATA_DIR=/data
+      - HOST=0.0.0.0
+      - PORT=3000
+    volumes:
+      - loyalflow-data:/data
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - loyalflow
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  loyalflow-data:
+  caddy-data:
+  caddy-config:

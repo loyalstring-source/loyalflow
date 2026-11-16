@@ -1,0 +1,36 @@
+{
+  "name": "loyalflow",
+  "version": "1.17.1",
+  "description": "LoyalFlow: Loyal String's workforce management platform (service desk, sales, production, people, SOPs and KPIs with one company page).",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "node --watch --no-warnings=ExperimentalWarning src/server.ts",
+    "start": "node --no-warnings=ExperimentalWarning dist/server.js",
+    "start:src": "node --no-warnings=ExperimentalWarning src/server.ts",
+    "demo": "node --no-warnings=ExperimentalWarning src/server.ts --demo",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "seed": "node --no-warnings=ExperimentalWarning src/cli.ts seed",
+    "seed:demo": "node --no-warnings=ExperimentalWarning src/cli.ts seed --demo",
+    "backup": "node --no-warnings=ExperimentalWarning src/cli.ts backup",
+    "test": "node --no-warnings=ExperimentalWarning --test tests/unit/*.test.ts tests/integration/*.test.ts",
+    "test:unit": "node --no-warnings=ExperimentalWarning --test tests/unit/*.test.ts",
+    "test:e2e": "playwright test",
+    "test:all": "npm run typecheck && npm test && npm run test:e2e",
+    "docker:up": "docker compose up -d --build",
+    "docker:logs": "docker compose logs -f loyalflow",
+    "seed:bulk": "node --no-warnings=ExperimentalWarning src/cli.ts seed-bulk"
+  },
+  "dependencies": {
+    "pptxgenjs": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "playwright": "^1.63.0",
+    "typescript": "^6.0.3"
+  }
+}

@@ -1,0 +1,20 @@
+# Caddy terminates HTTPS (Let's Encrypt, automatic) and proxies to the app.
+# DOMAIN comes from .env; use "localhost" for a laptop (Caddy then serves a self-signed certificate).
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy loyalflow:3000 {
+		header_up X-Forwarded-For {remote_host}
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy same-origin
+	}
+	log {
+		output file /data/access.log {
+			roll_size 20mb
+			roll_keep 5
+		}
+	}
+}

@@ -1,0 +1,453 @@
+// Reports for every module. Each report is a definition: who may run it, which filters it takes, and a function
+// that turns a date range into columns, rows, an optional totals row and an optional chart.
+// One screen (/reports) and one Excel export serve them all.
+import type { App } from '../../app.ts';
+import type { Employee } from '../people/model.ts';
+import { can, scopeFor } from '../../lib/scope.ts';
+import { atLeast } from '../../lib/roles.ts';
+import { rules as attendanceRules } from '../hr/attendance-rules.ts';
+import { monthSheet } from '../hr/attendance.ts';
+import { budgets } from '../ops/service.ts';
+import { STAGES as DEAL_STAGES, STAGE_LABEL as DEAL_LABEL } from '../sales/service.ts';
+import { STAGES as HIRE_STAGES, STAGE_LABEL as HIRE_LABEL } from '../hr/recruiting.ts';
+import { RATINGS } from '../hr/appraisal.ts';
+import * as lists from '../../lib/lists.ts';
+import { localDateString, addDays, fiscalYear } from '../../lib/time.ts';
+
+export type Fmt = 'text' | 'int' | 'money' | 'pct' | 'num' | 'date' | 'link';
+export interface Column { header: string; fmt?: Fmt; width?: number }
+export type Cell = string | number | null | { text: string; href: string };
+export interface Chart { title: string; unit?: string; labels: string[]; values: number[] }
+export interface ReportResult { columns: Column[]; rows: Cell[][]; totals?: Cell[]; chart?: Chart; note?: string }
+export interface RunCtx { from: string; to: string; departmentId: string; personId: string; /** People whose records the viewer may see; null means everyone. */ people: Set<string> | null; viewer: Employee }
+export type ModuleId = 'sales' | 'support' | 'dev' | 'production' | 'finance' | 'attendance' | 'hiring' | 'appraisals' | 'sops' | 'approvals' | 'dsr' | 'admin';
+export interface ReportDef {
+  key: string; module: ModuleId; title: string; about: string;
+  /** Which filters mean something for this report. The date range always applies unless `noRange`. */
+  filters: ('department' | 'person')[]; noRange?: boolean;
+  allowed: (app: App, user: Employee) => boolean;
+  run: (app: App, c: RunCtx) => ReportResult;
+}
+export const MODULE_NAME: Record<ModuleId, string> = { sales: 'Sales', support: 'Support', dev: 'Development', production: 'Production', finance: 'Finance', attendance: 'Attendance and leave', hiring: 'Hiring', appraisals: 'Appraisals', sops: 'SOPs', approvals: 'Approvals', dsr: 'Daily review', admin: 'Administration' };
+/** Which menu module each group of reports sits under. */
+export const MENU_OF: Record<ModuleId, string> = { sales: 'sales', support: 'support', dev: 'dev', production: 'production', finance: 'company', attendance: 'people', hiring: 'people', appraisals: 'people', sops: 'company', approvals: 'company', dsr: 'company', admin: 'admin' };
+
+// ---------- helpers ----------
+const TZ = "'+330 minutes'";
+const ld = (col: string): string => `date(${col}, ${TZ})`;          // a stored UTC time as a local date
+const ym = (col: string): string => `strftime('%Y-%m', ${col}, ${TZ})`;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const monthLabel = (m: string): string => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
+const pct = (a: number, b: number): number | null => (b ? Math.round((a / b) * 1000) / 10 : null);
+const r1 = (n: number | null | undefined): number | null => (n == null ? null : Math.round(n * 10) / 10);
+const sum = (rows: Cell[][], i: number): number => rows.reduce((n, r) => n + (typeof r[i] === 'number' ? (r[i] as number) : 0), 0);
+function monthsBetween(from: string, to: string): string[] {
+  const out: string[] = []; let y = Number(from.slice(0, 4)), m = Number(from.slice(5, 7)); const ey = Number(to.slice(0, 4)), em = Number(to.slice(5, 7));
+  while ((y < ey || (y === ey && m <= em)) && out.length < 36) { out.push(`${y}-${String(m).padStart(2, '0')}`); m++; if (m > 12) { m = 1; y++; } }
+  return out;
+}
+/** Adds "column IN (…)" for the people the viewer may see, the department and the person filter. `col` is an employee id column. */
+function who(c: RunCtx, col: string, params: unknown[], opts: { deptVia?: string } = {}): string {
+  const parts: string[] = [];
+  if (c.people) { if (!c.people.size) return ' AND 1 = 0'; parts.push(`${col} IN (${[...c.people].map(() => '?').join(',')})`); params.push(...c.people); }
+  if (c.personId) { parts.push(`${col} = ?`); params.push(c.personId); }
+  if (c.departmentId) { parts.push(`${opts.deptVia || `(SELECT department_id FROM employees WHERE id = ${col})`} = ?`); params.push(c.departmentId); }
+  return parts.length ? ' AND ' + parts.join(' AND ') : '';
+}
+const between = (col: string, c: RunCtx, params: unknown[]): string => { params.push(c.from, c.to); return `${col} BETWEEN ? AND ?`; };
+const link = (text: string | null | undefined, href: string): Cell => (text ? { text, href } : null);
+const sales = (app: App, u: Employee): boolean => atLeast(app.db, u, 'sales', 'view');
+const desk = (app: App, u: Employee): boolean => atLeast(app.db, u, 'desk', 'view');
+const dev = (app: App, u: Employee): boolean => atLeast(app.db, u, 'dev', 'view');
+const prod = (app: App, u: Employee): boolean => atLeast(app.db, u, 'production', 'view');
+const managerOrAbove = (app: App, u: Employee): boolean => can(app.db, u, 'reports.company');
+const attendanceAllowed = (app: App, u: Employee): boolean => can(app.db, u, 'attendance.manage') || scopeFor(app.db, u).level !== 'self';
+const netValue = 'd.value * (1 - COALESCE(d.discount_pct, 0) / 100.0)';
+
+// ---------- the reports ----------
+export const REPORTS: ReportDef[] = [
+  // ===== Sales =====
+  { key: 'sales-won-lost', module: 'sales', title: 'Won and lost by month', about: 'Deals closed each month, their value after discount, and the win rate.', filters: ['department', 'person'], allowed: sales,
+    run(app, c) {
+      const p: unknown[] = []; const w = who(c, 'd.owner_id', p);
+      const rows = monthsBetween(c.from, c.to).map((m): Cell[] => {
+        const won = app.db.get<{ n: number; v: number }>(`SELECT COUNT(*) AS n, COALESCE(SUM(${netValue}), 0) AS v FROM deals d WHERE d.stage = 'won' AND ${ym('d.won_at')} = ? AND ${ld('d.won_at')} BETWEEN ? AND ?${w}`, [m, c.from, c.to, ...p])!;
+        const lost = app.db.get<{ n: number; v: number }>(`SELECT COUNT(*) AS n, COALESCE(SUM(${netValue}), 0) AS v FROM deals d WHERE d.stage = 'lost' AND ${ym('d.lost_at')} = ? AND ${ld('d.lost_at')} BETWEEN ? AND ?${w}`, [m, c.from, c.to, ...p])!;
+        return [monthLabel(m), won.n, Math.round(won.v), lost.n, Math.round(lost.v), pct(won.n, won.n + lost.n)];
+      });
+      const tw = sum(rows, 1), tl = sum(rows, 3);
+      return { columns: [{ header: 'Month' }, { header: 'Won', fmt: 'int' }, { header: 'Won value', fmt: 'money' }, { header: 'Lost', fmt: 'int' }, { header: 'Lost value', fmt: 'money' }, { header: 'Win rate', fmt: 'pct' }], rows,
+        totals: ['Total', tw, sum(rows, 2), tl, sum(rows, 4), pct(tw, tw + tl)], chart: { title: 'Won value by month', unit: '₹', labels: rows.map((r) => String(r[0])), values: rows.map((r) => Number(r[2]) || 0) } };
+    } },
+  { key: 'sales-by-person', module: 'sales', title: 'Sales by person', about: 'For each sales person: open deals now, what they won and lost in the period, and how active they were.', filters: ['department', 'person'], allowed: sales,
+    run(app, c) {
+      const p: unknown[] = []; const w = who(c, 'e.id', p, { deptVia: 'e.department_id' });
+      const rows = app.db.all<{ id: string; name: string; open_n: number; open_v: number; won_n: number; won_v: number; lost_n: number; acts: number }>(`SELECT e.id, e.full_name AS name,
+        (SELECT COUNT(*) FROM deals d WHERE d.owner_id = e.id AND d.stage NOT IN ('won','lost')) AS open_n,
+        (SELECT COALESCE(SUM(${netValue}), 0) FROM deals d WHERE d.owner_id = e.id AND d.stage NOT IN ('won','lost')) AS open_v,
+        (SELECT COUNT(*) FROM deals d WHERE d.owner_id = e.id AND d.stage = 'won' AND ${ld('d.won_at')} BETWEEN ?1 AND ?2) AS won_n,
+        (SELECT COALESCE(SUM(${netValue}), 0) FROM deals d WHERE d.owner_id = e.id AND d.stage = 'won' AND ${ld('d.won_at')} BETWEEN ?1 AND ?2) AS won_v,
+        (SELECT COUNT(*) FROM deals d WHERE d.owner_id = e.id AND d.stage = 'lost' AND ${ld('d.lost_at')} BETWEEN ?1 AND ?2) AS lost_n,
+        (SELECT COUNT(*) FROM activities a WHERE a.actor_id = e.id AND a.kind IN ('call','visit','demo','email') AND ${ld('a.at')} BETWEEN ?1 AND ?2) AS acts
+        FROM employees e WHERE e.id IN (SELECT owner_id FROM deals)${w} ORDER BY won_v DESC, open_v DESC`, [c.from, c.to, ...p])
+        .map((r): Cell[] => [link(r.name, `/people/${r.id}`), r.open_n, Math.round(r.open_v), r.won_n, Math.round(r.won_v), r.lost_n, pct(r.won_n, r.won_n + r.lost_n), r.acts]);
+      return { columns: [{ header: 'Person', fmt: 'link' }, { header: 'Open deals', fmt: 'int' }, { header: 'Open value', fmt: 'money' }, { header: 'Won', fmt: 'int' }, { header: 'Won value', fmt: 'money' }, { header: 'Lost', fmt: 'int' }, { header: 'Win rate', fmt: 'pct' }, { header: 'Calls, visits, demos', fmt: 'int' }], rows,
+        totals: ['Total', sum(rows, 1), sum(rows, 2), sum(rows, 3), sum(rows, 4), sum(rows, 5), pct(sum(rows, 3), sum(rows, 3) + sum(rows, 5)), sum(rows, 7)],
+        chart: { title: 'Won value by person', unit: '₹', labels: rows.map((r) => (r[0] as { text: string }).text), values: rows.map((r) => Number(r[4]) || 0) } };
+    } },
+  { key: 'sales-lost-reasons', module: 'sales', title: 'Why deals were lost', about: 'Lost deals in the period, grouped by the reason given.', filters: ['department', 'person'], allowed: sales,
+    run(app, c) {
+      const p: unknown[] = [c.from, c.to]; const w = who(c, 'd.owner_id', p);
+      const rows = app.db.all<{ r: string; n: number; v: number }>(`SELECT COALESCE(NULLIF(d.lost_reason, ''), 'No reason given') AS r, COUNT(*) AS n, COALESCE(SUM(d.value), 0) AS v FROM deals d WHERE d.stage = 'lost' AND ${ld('d.lost_at')} BETWEEN ? AND ?${w} GROUP BY 1 ORDER BY n DESC`, p).map((r): Cell[] => [r.r, r.n, Math.round(r.v)]);
+      const t = sum(rows, 1);
+      return { columns: [{ header: 'Reason' }, { header: 'Deals', fmt: 'int' }, { header: 'List value', fmt: 'money' }, { header: 'Share', fmt: 'pct' }], rows: rows.map((r) => [...r, pct(Number(r[1]), t)]), totals: ['Total', t, sum(rows, 2), t ? 100 : null],
+        chart: { title: 'Lost deals by reason', labels: rows.map((r) => String(r[0])), values: rows.map((r) => Number(r[1])) } };
+    } },
+  { key: 'sales-funnel', module: 'sales', title: 'Stage by stage', about: 'Of the deals created in the period, how many got at least as far as each stage. For a lost deal the stage it reached is worked out from what it had (need recorded, estimate, purchase order), so read this as a guide.', filters: ['department', 'person'], allowed: sales,
+    run(app, c) {
+      const p: unknown[] = [c.from, c.to]; const w = who(c, 'd.owner_id', p);
+      const deals = app.db.all<{ stage: string; quote_attached: number; qualified_need: string | null; po_received: number }>(`SELECT d.stage, d.quote_attached, d.qualified_need, d.po_received FROM deals d WHERE ${ld('d.created_at')} BETWEEN ? AND ?${w}`, p);
+      const reached = (d: { stage: string; quote_attached: number; qualified_need: string | null; po_received: number }): number => {
+        if (d.stage !== 'lost') return DEAL_STAGES.indexOf(d.stage as typeof DEAL_STAGES[number]);
+        return d.po_received ? DEAL_STAGES.indexOf('negotiation') : d.quote_attached ? DEAL_STAGES.indexOf('proposal') : d.qualified_need ? DEAL_STAGES.indexOf('qualified') : 0;
+      };
+      let prev = deals.length;
+      const rows = DEAL_STAGES.map((s, i): Cell[] => { const n = deals.filter((d) => reached(d) >= i).length; const row: Cell[] = [DEAL_LABEL[s], n, pct(n, deals.length), i === 0 ? null : pct(n, prev)]; prev = n; return row; });
+      return { columns: [{ header: 'Stage' }, { header: 'Deals that got here', fmt: 'int' }, { header: 'Of all created', fmt: 'pct' }, { header: 'Of the stage before', fmt: 'pct' }], rows, note: `${deals.length} deals were created in the period.`,
+        chart: { title: 'Deals reaching each stage', labels: rows.map((r) => String(r[0])), values: rows.map((r) => Number(r[1])) } };
+    } },
+  { key: 'sales-estimates', module: 'sales', title: 'Estimates sent and accepted', about: 'Estimates finalised in the period for each person: how many were sent, accepted, declined or ran out of time.', filters: ['department', 'person'], allowed: sales,
+    run(app, c) {
+      const p: unknown[] = [localDateString(new Date()), c.from, c.to]; const w = who(c, 'd.owner_id', p);
+      const rows = app.db.all<{ id: string; name: string; n: number; sent: number; acc: number; dec: number; exp: number; v: number }>(`SELECT o.id, o.full_name AS name, COUNT(*) AS n,
+        SUM(CASE WHEN e.status IN ('sent','accepted','declined') THEN 1 ELSE 0 END) AS sent, SUM(CASE WHEN e.status = 'accepted' THEN 1 ELSE 0 END) AS acc, SUM(CASE WHEN e.status = 'declined' THEN 1 ELSE 0 END) AS dec,
+        SUM(CASE WHEN e.status = 'sent' AND e.valid_until < ? THEN 1 ELSE 0 END) AS exp, COALESCE(SUM(CASE WHEN e.status = 'accepted' THEN e.taxable ELSE 0 END), 0) AS v
+        FROM estimates e JOIN deals d ON d.id = e.deal_id JOIN employees o ON o.id = d.owner_id WHERE e.status NOT IN ('draft','superseded') AND e.estimate_date BETWEEN ? AND ?${w} GROUP BY o.id ORDER BY v DESC, n DESC`, p)
+        .map((r): Cell[] => [link(r.name, `/people/${r.id}`), r.n, r.sent, r.acc, r.dec, r.exp, pct(r.acc, r.acc + r.dec), Math.round(r.v)]);
+      return { columns: [{ header: 'Person', fmt: 'link' }, { header: 'Finalised', fmt: 'int' }, { header: 'Sent', fmt: 'int' }, { header: 'Accepted', fmt: 'int' }, { header: 'Declined', fmt: 'int' }, { header: 'Expired', fmt: 'int' }, { header: 'Accepted of answered', fmt: 'pct' }, { header: 'Accepted value before GST', fmt: 'money' }], rows,
+        totals: ['Total', sum(rows, 1), sum(rows, 2), sum(rows, 3), sum(rows, 4), sum(rows, 5), pct(sum(rows, 3), sum(rows, 3) + sum(rows, 4)), sum(rows, 7)] };
+    } },
+  { key: 'sales-products', module: 'sales', title: 'Sales by product', about: 'What was quoted and what customers accepted, product by product, on estimates dated in the period.', filters: ['department', 'person'], allowed: sales,
+    run(app, c) {
+      const p: unknown[] = [c.from, c.to]; const w = who(c, 'd.owner_id', p);
+      const rows = app.db.all<{ name: string; unit: string; q: number; qv: number; a: number; av: number }>(`SELECT i.name, i.unit, SUM(i.qty) AS q, SUM(i.taxable) AS qv, SUM(CASE WHEN e.status = 'accepted' THEN i.qty ELSE 0 END) AS a, SUM(CASE WHEN e.status = 'accepted' THEN i.taxable ELSE 0 END) AS av
+        FROM estimate_items i JOIN estimates e ON e.id = i.estimate_id JOIN deals d ON d.id = e.deal_id WHERE e.status IN ('final','sent','accepted','declined') AND e.estimate_date BETWEEN ? AND ?${w} GROUP BY i.name, i.unit ORDER BY av DESC, qv DESC`, p)
+        .map((r): Cell[] => [r.name, r.unit, r1(r.q), Math.round(r.qv), r1(r.a), Math.round(r.av)]);
+      return { columns: [{ header: 'Product' }, { header: 'Unit' }, { header: 'Quantity quoted', fmt: 'num' }, { header: 'Quoted value', fmt: 'money' }, { header: 'Quantity accepted', fmt: 'num' }, { header: 'Accepted value', fmt: 'money' }], rows, totals: ['Total', null, null, sum(rows, 3), null, sum(rows, 5)],
+        chart: { title: 'Accepted value by product', unit: '₹', labels: rows.slice(0, 12).map((r) => String(r[0])), values: rows.slice(0, 12).map((r) => Number(r[5])) } };
+    } },
+  { key: 'sales-sources', module: 'sales', title: 'Where deals come from', about: 'Deals created in the period by source, and how many of them were won.', filters: ['department', 'person'], allowed: sales,
+    run(app, c) {
+      const p: unknown[] = [c.from, c.to]; const w = who(c, 'd.owner_id', p);
+      const rows = app.db.all<{ s: string; n: number; won: number; lost: number; v: number }>(`SELECT COALESCE(NULLIF(d.source, ''), 'Not recorded') AS s, COUNT(*) AS n, SUM(CASE WHEN d.stage = 'won' THEN 1 ELSE 0 END) AS won, SUM(CASE WHEN d.stage = 'lost' THEN 1 ELSE 0 END) AS lost, COALESCE(SUM(CASE WHEN d.stage = 'won' THEN ${netValue} ELSE 0 END), 0) AS v FROM deals d WHERE ${ld('d.created_at')} BETWEEN ? AND ?${w} GROUP BY 1 ORDER BY n DESC`, p)
+        .map((r): Cell[] => [r.s, r.n, r.won, r.lost, r.n - r.won - r.lost, pct(r.won, r.won + r.lost), Math.round(r.v)]);
+      return { columns: [{ header: 'Source' }, { header: 'Deals', fmt: 'int' }, { header: 'Won', fmt: 'int' }, { header: 'Lost', fmt: 'int' }, { header: 'Still open', fmt: 'int' }, { header: 'Win rate', fmt: 'pct' }, { header: 'Won value', fmt: 'money' }], rows, totals: ['Total', sum(rows, 1), sum(rows, 2), sum(rows, 3), sum(rows, 4), pct(sum(rows, 2), sum(rows, 2) + sum(rows, 3)), sum(rows, 6)],
+        chart: { title: 'Deals by source', labels: rows.map((r) => String(r[0])), values: rows.map((r) => Number(r[1])) } };
+    } },
+
+  // ===== Support =====
+  { key: 'support-by-customer', module: 'support', title: 'Tickets by customer', about: 'Tickets raised in the period for each customer, how many are still open, and how they were handled.', filters: [], allowed: desk,
+    run(app, c) {
+      const rows = app.db.all<{ id: string; name: string; n: number; open: number; late: number; h: number | null; rating: number | null }>(`SELECT c.id, c.name, COUNT(*) AS n, SUM(CASE WHEN t.status NOT IN ('resolved','closed') THEN 1 ELSE 0 END) AS open, SUM(CASE WHEN t.within_sla = 0 THEN 1 ELSE 0 END) AS late,
+        AVG(CASE WHEN t.resolved_at IS NOT NULL THEN (julianday(t.resolved_at) - julianday(t.created_at)) * 24 END) AS h, AVG(t.rating) AS rating FROM tickets t JOIN customers c ON c.id = t.customer_id WHERE ${ld('t.created_at')} BETWEEN ? AND ? GROUP BY c.id ORDER BY n DESC`, [c.from, c.to])
+        .map((r): Cell[] => [link(r.name, `/customers/${r.id}`), r.n, r.open, r.late, r1(r.h), r1(r.rating)]);
+      return { columns: [{ header: 'Customer', fmt: 'link' }, { header: 'Tickets', fmt: 'int' }, { header: 'Open now', fmt: 'int' }, { header: 'Past resolution time', fmt: 'int' }, { header: 'Average hours to resolve', fmt: 'num' }, { header: 'Average rating (of 5)', fmt: 'num' }], rows, totals: ['Total', sum(rows, 1), sum(rows, 2), sum(rows, 3), null, null],
+        chart: { title: 'Tickets by customer', labels: rows.slice(0, 12).map((r) => (r[0] as { text: string }).text), values: rows.slice(0, 12).map((r) => Number(r[1])) } };
+    } },
+  { key: 'support-by-type', module: 'support', title: 'Tickets by type and priority', about: 'Tickets raised in the period, by type and priority, with how many were resolved in time.', filters: [], allowed: desk,
+    run(app, c) {
+      const rows = app.db.all<{ type: string; priority: string; n: number; res: number; ok: number; late: number }>(`SELECT t.type, t.priority, COUNT(*) AS n, SUM(CASE WHEN t.resolved_at IS NOT NULL THEN 1 ELSE 0 END) AS res, SUM(CASE WHEN t.within_sla = 1 THEN 1 ELSE 0 END) AS ok, SUM(CASE WHEN t.within_sla = 0 THEN 1 ELSE 0 END) AS late FROM tickets t WHERE ${ld('t.created_at')} BETWEEN ? AND ? GROUP BY t.type, t.priority ORDER BY t.type, t.priority`, [c.from, c.to])
+        .map((r): Cell[] => [lists.label('desk.types', r.type), lists.label('desk.priorities', r.priority), r.n, r.res, r.ok, r.late, pct(r.ok, r.ok + r.late)]);
+      return { columns: [{ header: 'Type' }, { header: 'Priority' }, { header: 'Raised', fmt: 'int' }, { header: 'Resolved', fmt: 'int' }, { header: 'In time', fmt: 'int' }, { header: 'Late', fmt: 'int' }, { header: 'In time', fmt: 'pct' }], rows, totals: ['Total', null, sum(rows, 2), sum(rows, 3), sum(rows, 4), sum(rows, 5), pct(sum(rows, 4), sum(rows, 4) + sum(rows, 5))] };
+    } },
+  { key: 'support-by-person', module: 'support', title: 'Tickets by person', about: 'For each person who owns tickets: what they resolved in the period, how fast, and what customers said.', filters: ['department', 'person'], allowed: desk,
+    run(app, c) {
+      const p: unknown[] = [c.from, c.to]; const w = who(c, 't.assignee_id', p);
+      const rows = app.db.all<{ id: string; name: string; res: number; ok: number; late: number; fr: number | null; h: number | null; rating: number | null; reo: number }>(`SELECT e.id, e.full_name AS name, COUNT(*) AS res, SUM(CASE WHEN t.within_sla = 1 THEN 1 ELSE 0 END) AS ok, SUM(CASE WHEN t.within_sla = 0 THEN 1 ELSE 0 END) AS late,
+        AVG(CASE WHEN t.first_response_at IS NOT NULL THEN (julianday(t.first_response_at) - julianday(t.created_at)) * 1440 END) AS fr, AVG((julianday(t.resolved_at) - julianday(t.created_at)) * 24) AS h, AVG(t.rating) AS rating, SUM(t.reopen_count) AS reo
+        FROM tickets t JOIN employees e ON e.id = t.assignee_id WHERE t.resolved_at IS NOT NULL AND ${ld('t.resolved_at')} BETWEEN ? AND ?${w} GROUP BY e.id ORDER BY res DESC`, p)
+        .map((r): Cell[] => [link(r.name, `/people/${r.id}`), r.res, pct(r.ok, r.ok + r.late), r.fr == null ? null : Math.round(r.fr), r1(r.h), r1(r.rating), r.reo]);
+      return { columns: [{ header: 'Person', fmt: 'link' }, { header: 'Resolved', fmt: 'int' }, { header: 'In time', fmt: 'pct' }, { header: 'Average minutes to first reply', fmt: 'int' }, { header: 'Average hours to resolve', fmt: 'num' }, { header: 'Average rating (of 5)', fmt: 'num' }, { header: 'Reopened', fmt: 'int' }], rows, totals: ['Total', sum(rows, 1), null, null, null, null, sum(rows, 6)],
+        chart: { title: 'Tickets resolved by person', labels: rows.map((r) => (r[0] as { text: string }).text), values: rows.map((r) => Number(r[1])) } };
+    } },
+  { key: 'support-repeat', module: 'support', title: 'Repeat problems', about: 'Customers who raised three or more tickets in the period, and tickets that were reopened. These are the places to look for a root cause.', filters: [], allowed: desk,
+    run(app, c) {
+      const rows = app.db.all<{ id: string; name: string; n: number; reo: number; last: string; subjects: string }>(`SELECT c.id, c.name, COUNT(*) AS n, SUM(t.reopen_count) AS reo, MAX(${ld('t.created_at')}) AS last, GROUP_CONCAT(t.subject, ' | ') AS subjects FROM tickets t JOIN customers c ON c.id = t.customer_id WHERE t.type = 'support' AND ${ld('t.created_at')} BETWEEN ? AND ? GROUP BY c.id HAVING COUNT(*) >= 3 OR SUM(t.reopen_count) > 0 ORDER BY n DESC`, [c.from, c.to])
+        .map((r): Cell[] => [link(r.name, `/customers/${r.id}`), r.n, r.reo, r.last, r.subjects.length > 160 ? r.subjects.slice(0, 157) + '…' : r.subjects]);
+      return { columns: [{ header: 'Customer', fmt: 'link' }, { header: 'Tickets', fmt: 'int' }, { header: 'Times reopened', fmt: 'int' }, { header: 'Last raised', fmt: 'date' }, { header: 'What they were about', width: 60 }], rows };
+    } },
+  { key: 'support-ratings', module: 'support', title: 'Customer ratings', about: 'Ratings customers gave after a ticket was resolved in the period, lowest first.', filters: ['department', 'person'], allowed: desk,
+    run(app, c) {
+      const p: unknown[] = [c.from, c.to]; const w = who(c, 't.assignee_id', p);
+      const all = app.db.all<{ id: string; subject: string; customer: string; name: string | null; rating: number; d: string }>(`SELECT t.id, t.subject, c.name AS customer, e.full_name AS name, t.rating, ${ld('t.resolved_at')} AS d FROM tickets t JOIN customers c ON c.id = t.customer_id LEFT JOIN employees e ON e.id = t.assignee_id WHERE t.rating IS NOT NULL AND ${ld('t.resolved_at')} BETWEEN ? AND ?${w} ORDER BY t.rating, t.resolved_at DESC LIMIT 500`, p);
+      const avg = all.length ? Math.round(all.reduce((n, r) => n + r.rating, 0) / all.length * 10) / 10 : null;
+      return { columns: [{ header: 'Ticket', fmt: 'link' }, { header: 'Subject', width: 44 }, { header: 'Customer' }, { header: 'Handled by' }, { header: 'Rating (of 5)', fmt: 'int' }, { header: 'Resolved', fmt: 'date' }], rows: all.map((r): Cell[] => [link(r.id, `/tickets/${r.id}`), r.subject, r.customer, r.name, r.rating, r.d]),
+        note: all.length ? `${all.length} ratings, average ${avg} of 5.` : undefined, chart: { title: 'Ratings given', labels: ['1', '2', '3', '4', '5'], values: [1, 2, 3, 4, 5].map((n) => all.filter((r) => r.rating === n).length) } };
+    } },
+  { key: 'support-implementations', module: 'support', title: 'Implementation timelines', about: 'Implementation tickets raised in the period: days planned against days taken.', filters: [], allowed: desk,
+    run(app, c) {
+      const rows = app.db.all<{ id: string; subject: string; customer: string; d: string; plan: number | null; days: number; status: string; stage: string | null }>(`SELECT t.id, t.subject, c.name AS customer, ${ld('t.created_at')} AS d, t.impl_plan_days AS plan, CAST(julianday(COALESCE(t.resolved_at, 'now')) - julianday(t.created_at) AS INTEGER) AS days, t.status, t.impl_stage AS stage FROM tickets t JOIN customers c ON c.id = t.customer_id WHERE t.type = 'implementation' AND ${ld('t.created_at')} BETWEEN ? AND ? ORDER BY t.created_at DESC`, [c.from, c.to])
+        .map((r): Cell[] => [link(r.id, `/tickets/${r.id}`), r.customer, r.subject, r.d, r.plan, r.days, r.plan == null ? null : r.days - r.plan, ['resolved', 'closed'].includes(r.status) ? 'Finished' : r.stage ? `Open · ${r.stage}` : 'Open']);
+      return { columns: [{ header: 'Ticket', fmt: 'link' }, { header: 'Customer' }, { header: 'Subject', width: 40 }, { header: 'Started', fmt: 'date' }, { header: 'Days planned', fmt: 'int' }, { header: 'Days so far', fmt: 'int' }, { header: 'Days over plan', fmt: 'int' }, { header: 'Status' }], rows };
+    } },
+
+  // ===== Development =====
+  { key: 'dev-releases', module: 'dev', title: 'Release history', about: 'Releases planned or shipped in the period, with how late they were and how much went into each.', filters: [], allowed: dev,
+    run(app, c) {
+      const rows = app.db.all<{ id: string; version: string; name: string; project: string | null; planned: string | null; rel: string | null; n: number; bugs: number; status: string }>(`SELECT r.id, r.version, r.name, p.name AS project, r.planned_date AS planned, ${ld('r.released_at')} AS rel, (SELECT COUNT(*) FROM dev_issues i WHERE i.release_id = r.id) AS n, (SELECT COUNT(*) FROM dev_issues i WHERE i.release_id = r.id AND i.type = 'bug') AS bugs, r.status
+        FROM releases r LEFT JOIN projects p ON p.id = r.project_id WHERE COALESCE(${ld('r.released_at')}, r.planned_date, ${ld('r.created_at')}) BETWEEN ? AND ? ORDER BY COALESCE(r.released_at, r.planned_date) DESC`, [c.from, c.to])
+        .map((r): Cell[] => [link(r.version, `/dev/releases/${r.id}`), r.name, r.project, r.planned, r.rel, r.planned && r.rel ? Math.round((Date.parse(r.rel) - Date.parse(r.planned)) / 86400000) : null, r.n, r.bugs, r.status === 'released' ? 'Released' : 'Planned']);
+      return { columns: [{ header: 'Version', fmt: 'link' }, { header: 'Name' }, { header: 'Project' }, { header: 'Planned', fmt: 'date' }, { header: 'Released', fmt: 'date' }, { header: 'Days late', fmt: 'int' }, { header: 'Issues', fmt: 'int' }, { header: 'Of which bugs', fmt: 'int' }, { header: 'Status' }], rows };
+    } },
+  { key: 'dev-projects', module: 'dev', title: 'Work by project', about: 'For each project: what is open now, what was released in the period, and the hours logged.', filters: [], allowed: dev,
+    run(app, c) {
+      const rows = app.db.all<{ id: string | null; name: string; open: number; bugs: number; done: number; pts: number; mins: number }>(`SELECT p.id, COALESCE(p.name, 'No project') AS name, SUM(CASE WHEN i.status != 'released' THEN 1 ELSE 0 END) AS open, SUM(CASE WHEN i.status != 'released' AND i.type = 'bug' THEN 1 ELSE 0 END) AS bugs,
+        SUM(CASE WHEN i.status = 'released' AND ${ld('i.released_at')} BETWEEN ?1 AND ?2 THEN 1 ELSE 0 END) AS done, COALESCE(SUM(CASE WHEN i.status = 'released' AND ${ld('i.released_at')} BETWEEN ?1 AND ?2 THEN i.points ELSE 0 END), 0) AS pts,
+        COALESCE((SELECT SUM(l.minutes) FROM time_logs l JOIN dev_issues x ON x.id = l.entity_id WHERE l.entity_type = 'issue' AND COALESCE(x.project_id, '') = COALESCE(p.id, '') AND ${ld('l.started_at')} BETWEEN ?1 AND ?2), 0) AS mins
+        FROM dev_issues i LEFT JOIN projects p ON p.id = i.project_id GROUP BY p.id ORDER BY open DESC`, [c.from, c.to])
+        .map((r): Cell[] => [r.id ? link(r.name, `/dev/projects/${r.id}`) : r.name, r.open, r.bugs, r.done, r.pts, r1(r.mins / 60)]);
+      return { columns: [{ header: 'Project', fmt: 'link' }, { header: 'Open issues', fmt: 'int' }, { header: 'Open bugs', fmt: 'int' }, { header: 'Released in period', fmt: 'int' }, { header: 'Points released', fmt: 'int' }, { header: 'Hours logged', fmt: 'num' }], rows, totals: ['Total', sum(rows, 1), sum(rows, 2), sum(rows, 3), sum(rows, 4), r1(sum(rows, 5))],
+        chart: { title: 'Hours logged by project', unit: 'h', labels: rows.map((r) => (typeof r[0] === 'object' && r[0] ? r[0].text : String(r[0]))), values: rows.map((r) => Number(r[5]) || 0) } };
+    } },
+  { key: 'dev-bugs', module: 'dev', title: 'Bugs', about: 'Bugs raised in the period by project and part of the product, with how many are still open and how many came back.', filters: [], allowed: dev,
+    run(app, c) {
+      const rows = app.db.all<{ project: string; comp: string; n: number; open: number; reo: number; fromCust: number }>(`SELECT COALESCE(p.name, 'No project') AS project, COALESCE(NULLIF(i.component, ''), 'Not set') AS comp, COUNT(*) AS n, SUM(CASE WHEN i.status != 'released' THEN 1 ELSE 0 END) AS open, SUM(i.reopen_count) AS reo, SUM(CASE WHEN i.customer_id IS NOT NULL THEN 1 ELSE 0 END) AS fromCust
+        FROM dev_issues i LEFT JOIN projects p ON p.id = i.project_id WHERE i.type = 'bug' AND ${ld('i.created_at')} BETWEEN ? AND ? GROUP BY 1, 2 ORDER BY n DESC`, [c.from, c.to]).map((r): Cell[] => [r.project, r.comp, r.n, r.open, r.reo, r.fromCust]);
+      return { columns: [{ header: 'Project' }, { header: 'Part of the product' }, { header: 'Bugs raised', fmt: 'int' }, { header: 'Still open', fmt: 'int' }, { header: 'Times reopened', fmt: 'int' }, { header: 'From a customer', fmt: 'int' }], rows, totals: ['Total', null, sum(rows, 2), sum(rows, 3), sum(rows, 4), sum(rows, 5)] };
+    } },
+
+  // ===== Production =====
+  { key: 'prod-on-time', module: 'production', title: 'On-time dispatch by month', about: 'Orders dispatched each month and how many left on or before the promised date.', filters: [], allowed: prod,
+    run(app, c) {
+      const rows = monthsBetween(c.from, c.to).map((m): Cell[] => {
+        const r = app.db.get<{ n: number; ok: number; noDate: number; late: number | null }>(`SELECT COUNT(*) AS n, SUM(CASE WHEN w.promised_date IS NOT NULL AND ${ld('w.dispatched_at')} <= w.promised_date THEN 1 ELSE 0 END) AS ok, SUM(CASE WHEN w.promised_date IS NULL THEN 1 ELSE 0 END) AS noDate,
+          AVG(CASE WHEN w.promised_date IS NOT NULL AND ${ld('w.dispatched_at')} > w.promised_date THEN julianday(${ld('w.dispatched_at')}) - julianday(w.promised_date) END) AS late FROM work_orders w WHERE w.kind = 'order' AND w.dispatched_at IS NOT NULL AND ${ym('w.dispatched_at')} = ? AND ${ld('w.dispatched_at')} BETWEEN ? AND ?`, [m, c.from, c.to])!;
+        const dated = r.n - (r.noDate || 0);
+        return [monthLabel(m), r.n, r.ok || 0, dated - (r.ok || 0), pct(r.ok || 0, dated), r1(r.late)];
+      });
+      return { columns: [{ header: 'Month' }, { header: 'Dispatched', fmt: 'int' }, { header: 'On time', fmt: 'int' }, { header: 'Late', fmt: 'int' }, { header: 'On time', fmt: 'pct' }, { header: 'Average days late', fmt: 'num' }], rows, totals: ['Total', sum(rows, 1), sum(rows, 2), sum(rows, 3), pct(sum(rows, 2), sum(rows, 2) + sum(rows, 3)), null],
+        chart: { title: 'Orders dispatched by month', labels: rows.map((r) => String(r[0])), values: rows.map((r) => Number(r[1])) } };
+    } },
+  { key: 'prod-stage-time', module: 'production', title: 'Time in each stage', about: 'For orders dispatched in the period: days waiting to start, days in production and packing, and days from packing to dispatch.', filters: [], allowed: prod,
+    run(app, c) {
+      const d = (a: string, b: string): string => `julianday(${b}) - julianday(${a})`;
+      const rows = app.db.all<{ id: string; customer: string | null; product: string; qty: number; q: number | null; mk: number | null; ds: number | null; dl: number | null; tot: number }>(`SELECT w.id, c.name AS customer, w.product, w.qty, ${d('w.created_at', 'w.started_at')} AS q, ${d('w.started_at', 'w.packed_at')} AS mk, ${d('w.packed_at', 'w.dispatched_at')} AS ds, ${d('w.dispatched_at', 'w.delivered_at')} AS dl, ${d('w.created_at', 'w.dispatched_at')} AS tot
+        FROM work_orders w LEFT JOIN customers c ON c.id = w.customer_id WHERE w.kind = 'order' AND w.dispatched_at IS NOT NULL AND ${ld('w.dispatched_at')} BETWEEN ? AND ? ORDER BY w.dispatched_at DESC LIMIT 500`, [c.from, c.to]);
+      const avg = (k: 'q' | 'mk' | 'ds' | 'dl' | 'tot'): number | null => { const v = rows.map((r) => r[k]).filter((x): x is number => x != null); return v.length ? r1(v.reduce((a, b) => a + b, 0) / v.length) : null; };
+      return { columns: [{ header: 'Order', fmt: 'link' }, { header: 'Customer' }, { header: 'Product' }, { header: 'Qty', fmt: 'int' }, { header: 'Days in queue', fmt: 'num' }, { header: 'Days making and packing', fmt: 'num' }, { header: 'Days packed to dispatch', fmt: 'num' }, { header: 'Days in transit', fmt: 'num' }, { header: 'Days order to dispatch', fmt: 'num' }],
+        rows: rows.map((r): Cell[] => [link(r.id, `/work-orders/${r.id}`), r.customer, r.product, r.qty, r1(r.q), r1(r.mk), r1(r.ds), r1(r.dl), r1(r.tot)]), totals: ['Average', null, null, null, avg('q'), avg('mk'), avg('ds'), avg('dl'), avg('tot')],
+        chart: { title: 'Average days in each stage', unit: 'days', labels: ['In queue', 'Making and packing', 'Packed to dispatch', 'In transit'], values: [avg('q') || 0, avg('mk') || 0, avg('ds') || 0, avg('dl') || 0] } };
+    } },
+  { key: 'prod-late', module: 'production', title: 'Late orders', about: 'Orders promised in the period that are past their date and not yet dispatched, or that left late.', filters: [], allowed: prod,
+    run(app, c) {
+      const today = localDateString(new Date());
+      const rows = app.db.all<{ id: string; customer: string | null; product: string; promised: string; stage: string; disp: string | null; mat: string | null; note: string | null; who: string | null }>(`SELECT w.id, c.name AS customer, w.product, w.promised_date AS promised, w.stage, ${ld('w.dispatched_at')} AS disp, w.materials_status AS mat, w.materials_note AS note, e.full_name AS who FROM work_orders w LEFT JOIN customers c ON c.id = w.customer_id LEFT JOIN employees e ON e.id = w.assignee_id
+        WHERE w.kind = 'order' AND w.promised_date BETWEEN ? AND ? AND ((w.dispatched_at IS NULL AND w.promised_date < ?) OR (w.dispatched_at IS NOT NULL AND ${ld('w.dispatched_at')} > w.promised_date)) ORDER BY w.promised_date`, [c.from, c.to, today])
+        .map((r): Cell[] => [link(r.id, `/work-orders/${r.id}`), r.customer, r.product, r.promised, r.disp, Math.round((Date.parse(r.disp || today) - Date.parse(r.promised)) / 86400000), r.disp ? 'Left late' : `Not dispatched · ${lists.label('production.stages', r.stage)}`, r.mat === 'short' || r.mat === 'waiting' ? `Materials ${r.mat}${r.note ? ': ' + r.note : ''}` : r.note, r.who]);
+      return { columns: [{ header: 'Order', fmt: 'link' }, { header: 'Customer' }, { header: 'Product' }, { header: 'Promised', fmt: 'date' }, { header: 'Dispatched', fmt: 'date' }, { header: 'Days late', fmt: 'int' }, { header: 'Status' }, { header: 'Reason noted', width: 40 }, { header: 'With' }], rows };
+    } },
+
+  // ===== Finance =====
+  { key: 'fin-expenses-category', module: 'finance', title: 'Expenses by category', about: 'Expense claims raised in the period, by category.', filters: ['department', 'person'], allowed: managerOrAbove,
+    run(app, c) {
+      const p: unknown[] = [c.from, c.to]; const w = who(c, 'x.employee_id', p);
+      const rows = app.db.all<{ cat: string; n: number; ok: number; pend: number; dec: number }>(`SELECT x.category AS cat, COUNT(*) AS n, COALESCE(SUM(CASE WHEN x.status = 'approved' THEN x.amount ELSE 0 END), 0) AS ok, COALESCE(SUM(CASE WHEN x.status = 'pending' THEN x.amount ELSE 0 END), 0) AS pend, COALESCE(SUM(CASE WHEN x.status = 'declined' THEN x.amount ELSE 0 END), 0) AS dec FROM expenses x WHERE ${ld('x.created_at')} BETWEEN ? AND ?${w} GROUP BY 1 ORDER BY ok DESC`, p).map((r): Cell[] => [r.cat, r.n, Math.round(r.ok), Math.round(r.pend), Math.round(r.dec)]);
+      return { columns: [{ header: 'Category' }, { header: 'Claims', fmt: 'int' }, { header: 'Approved', fmt: 'money' }, { header: 'Waiting', fmt: 'money' }, { header: 'Declined', fmt: 'money' }], rows, totals: ['Total', sum(rows, 1), sum(rows, 2), sum(rows, 3), sum(rows, 4)],
+        chart: { title: 'Approved expenses by category', unit: '₹', labels: rows.map((r) => String(r[0])), values: rows.map((r) => Number(r[2])) } };
+    } },
+  { key: 'fin-expenses-person', module: 'finance', title: 'Expenses by person', about: 'Expense claims raised in the period, person by person, with kilometres claimed.', filters: ['department', 'person'], allowed: managerOrAbove,
+    run(app, c) {
+      const p: unknown[] = [c.from, c.to]; const w = who(c, 'x.employee_id', p);
+      const rows = app.db.all<{ id: string; name: string; dept: string; n: number; ok: number; pend: number; km: number }>(`SELECT e.id, e.full_name AS name, d.name AS dept, COUNT(*) AS n, COALESCE(SUM(CASE WHEN x.status = 'approved' THEN x.amount ELSE 0 END), 0) AS ok, COALESCE(SUM(CASE WHEN x.status = 'pending' THEN x.amount ELSE 0 END), 0) AS pend, COALESCE(SUM(x.km), 0) AS km FROM expenses x JOIN employees e ON e.id = x.employee_id JOIN departments d ON d.id = e.department_id WHERE ${ld('x.created_at')} BETWEEN ? AND ?${w} GROUP BY e.id ORDER BY ok DESC`, p)
+        .map((r): Cell[] => [link(r.name, `/people/${r.id}`), r.dept, r.n, Math.round(r.ok), Math.round(r.pend), Math.round(r.km)]);
+      return { columns: [{ header: 'Person', fmt: 'link' }, { header: 'Department' }, { header: 'Claims', fmt: 'int' }, { header: 'Approved', fmt: 'money' }, { header: 'Waiting', fmt: 'money' }, { header: 'Kilometres', fmt: 'int' }], rows, totals: ['Total', null, sum(rows, 2), sum(rows, 3), sum(rows, 4), sum(rows, 5)] };
+    } },
+  { key: 'fin-purchases', module: 'finance', title: 'Purchases by supplier', about: 'Materials planned, ordered and received in the period, supplier by supplier.', filters: [], allowed: (app, u) => atLeast(app.db, u, 'procurement', 'view'),
+    run(app, c) {
+      const today = localDateString(new Date());
+      const rows = app.db.all<{ s: string; n: number; cost: number; rec: number; pend: number; late: number }>(`SELECT COALESCE(NULLIF(i.supplier, ''), 'Supplier not set') AS s, COUNT(*) AS n, COALESCE(SUM(i.est_cost), 0) AS cost, SUM(CASE WHEN i.status = 'received' THEN 1 ELSE 0 END) AS rec, SUM(CASE WHEN i.status != 'received' THEN 1 ELSE 0 END) AS pend,
+        SUM(CASE WHEN (i.status = 'received' AND i.expected_at IS NOT NULL AND date(i.received_at) > date(i.expected_at)) OR (i.status != 'received' AND COALESCE(i.expected_at, i.needed_by) < ?) THEN 1 ELSE 0 END) AS late FROM procurement_items i WHERE ${ld('i.created_at')} BETWEEN ? AND ? GROUP BY 1 ORDER BY cost DESC`, [today, c.from, c.to]).map((r): Cell[] => [r.s, r.n, Math.round(r.cost), r.rec, r.pend, r.late]);
+      return { columns: [{ header: 'Supplier' }, { header: 'Items', fmt: 'int' }, { header: 'Estimated cost', fmt: 'money' }, { header: 'Received', fmt: 'int' }, { header: 'Not yet received', fmt: 'int' }, { header: 'Late', fmt: 'int' }], rows, totals: ['Total', sum(rows, 1), sum(rows, 2), sum(rows, 3), sum(rows, 4), sum(rows, 5)] };
+    } },
+  { key: 'fin-budget', module: 'finance', title: 'Budget against spend', about: 'This financial year, department by department: the budget, what has been spent, and what is waiting for approval.', filters: [], noRange: true, allowed: (app, u) => atLeast(app.db, u, 'budgets', 'view') && managerOrAbove(app, u),
+    run(app) {
+      const fy = fiscalYear(new Date()); const rows = budgets(app, fy).map((b): Cell[] => [b.department, Math.round(b.amount), Math.round(b.spent), Math.round(b.committed), Math.round(b.remaining), b.pct]);
+      return { columns: [{ header: 'Department' }, { header: 'Budget', fmt: 'money' }, { header: 'Spent', fmt: 'money' }, { header: 'Waiting for approval', fmt: 'money' }, { header: 'Left', fmt: 'money' }, { header: 'Used', fmt: 'pct' }], rows, totals: ['Total', sum(rows, 1), sum(rows, 2), sum(rows, 3), sum(rows, 4), pct(sum(rows, 2), sum(rows, 1))], note: `Financial year ${fy}.`,
+        chart: { title: 'Spent by department', unit: '₹', labels: rows.map((r) => String(r[0])), values: rows.map((r) => Number(r[2])) } };
+    } },
+
+  // ===== Attendance and leave =====
+  { key: 'att-summary', module: 'attendance', title: 'Attendance summary', about: 'For each person in the months covered: days present, on leave, absent without leave, and late. Uses whole months.', filters: ['department', 'person'], allowed: attendanceAllowed,
+    run(app, c) {
+      const months = monthsBetween(c.from, c.to).slice(-6); const p: unknown[] = []; const w = who(c, 'e.id', p, { deptVia: 'e.department_id' });
+      const emps = app.db.all<Employee & { dept: string }>(`SELECT e.*, d.name AS dept FROM employees e JOIN departments d ON d.id = e.department_id WHERE e.status = 'active'${w} ORDER BY e.full_name LIMIT 1500`, p);
+      const rows = emps.map((e): Cell[] => { let present = 0, leave = 0, absent = 0, late = 0, working = 0; for (const m of months) { const s = monthSheet(app, e, m); present += s.present; leave += s.leave; absent += s.absent; late += s.late; working += s.workingDays; } return [link(e.full_name, `/attendance?employee=${e.id}&month=${months[months.length - 1]}`), e.dept, working, r1(present), r1(leave), absent, late, pct(present + leave, working)]; });
+      return { columns: [{ header: 'Person', fmt: 'link' }, { header: 'Department' }, { header: 'Working days', fmt: 'int' }, { header: 'Present', fmt: 'num' }, { header: 'On leave', fmt: 'num' }, { header: 'Absent without leave', fmt: 'int' }, { header: 'Late arrivals', fmt: 'int' }, { header: 'Attendance', fmt: 'pct' }], rows: rows.sort((a, b) => Number(b[5]) - Number(a[5])),
+        totals: ['Total', null, sum(rows, 2), r1(sum(rows, 3)), r1(sum(rows, 4)), sum(rows, 5), sum(rows, 6), pct(sum(rows, 3) + sum(rows, 4), sum(rows, 2))], note: `Months covered: ${months.map(monthLabel).join(', ')}. Working days still to come in the current month count as not yet present.` };
+    } },
+  { key: 'att-late', module: 'attendance', title: 'Late arrivals', about: 'People who arrived late in the period, how often, by how much, and how many of those days were cut to a half day.', filters: ['department', 'person'], allowed: attendanceAllowed,
+    run(app, c) {
+      const grace = attendanceRules(app).lateGraceMinutes; const p: unknown[] = [grace, c.from, c.to]; const w = who(c, 'a.employee_id', p);
+      const rows = app.db.all<{ id: string; name: string; dept: string; n: number; avg: number; mx: number; half: number }>(`SELECT e.id, e.full_name AS name, d.name AS dept, COUNT(*) AS n, AVG(a.minutes_late) AS avg, MAX(a.minutes_late) AS mx, SUM(CASE WHEN a.penalty = 'late_over_allowance' THEN 1 ELSE 0 END) AS half FROM attendance a JOIN employees e ON e.id = a.employee_id JOIN departments d ON d.id = e.department_id WHERE a.minutes_late > ? AND a.date BETWEEN ? AND ?${w} GROUP BY e.id ORDER BY n DESC`, p)
+        .map((r): Cell[] => [link(r.name, `/attendance?employee=${r.id}`), r.dept, r.n, Math.round(r.avg), r.mx, r.half]);
+      const by = new Map<string, number>(); for (const r of rows) by.set(String(r[1]), (by.get(String(r[1])) || 0) + Number(r[2]));
+      return { columns: [{ header: 'Person', fmt: 'link' }, { header: 'Department' }, { header: 'Late arrivals', fmt: 'int' }, { header: 'Average minutes late', fmt: 'int' }, { header: 'Most minutes late', fmt: 'int' }, { header: 'Cut to a half day', fmt: 'int' }], rows, totals: ['Total', null, sum(rows, 2), null, null, sum(rows, 5)], note: `Late means more than ${grace} minutes after the shift starts.`,
+        chart: { title: 'Late arrivals by department', labels: [...by.keys()], values: [...by.values()] } };
+    } },
+  { key: 'att-leave', module: 'attendance', title: 'Leave taken and balance', about: 'Approved leave that starts in the period, by type, with what each person has left this financial year.', filters: ['department', 'person'], allowed: attendanceAllowed,
+    run(app, c) {
+      const types = lists.allItems('hr.leaveTypes'); const fyStart = `${new Date().getUTCMonth() >= 3 ? new Date().getUTCFullYear() : new Date().getUTCFullYear() - 1}-04-01`;
+      const p: unknown[] = []; const w = who(c, 'e.id', p, { deptVia: 'e.department_id' });
+      const emps = app.db.all<{ id: string; name: string; dept: string }>(`SELECT e.id, e.full_name AS name, d.name AS dept FROM employees e JOIN departments d ON d.id = e.department_id WHERE e.status = 'active'${w} ORDER BY e.full_name LIMIT 1500`, p);
+      const taken = app.db.all<{ employee_id: string; type: string; days: number }>("SELECT employee_id, type, SUM(days) AS days FROM leave_requests WHERE status = 'approved' AND from_date BETWEEN ? AND ? GROUP BY employee_id, type", [c.from, c.to]);
+      const year = app.db.all<{ employee_id: string; type: string; days: number }>("SELECT employee_id, type, SUM(days) AS days FROM leave_requests WHERE status = 'approved' AND from_date >= ? GROUP BY employee_id, type", [fyStart]);
+      const get = (rows: { employee_id: string; type: string; days: number }[], id: string, t: string): number => rows.find((r) => r.employee_id === id && r.type === t)?.days || 0;
+      const rows = emps.map((e): Cell[] => { const t = types.map((x) => get(taken, e.id, x.value)); const left = types.filter((x) => x.active).reduce((n, x) => n + Math.max(0, (x.n ?? 0) - get(year, e.id, x.value)), 0); return [link(e.name, `/people/${e.id}`), e.dept, ...t, t.reduce((a, b) => a + b, 0), left]; }).filter((r) => c.personId || c.departmentId || Number(r[2 + types.length]) > 0 || emps.length <= 60);
+      const tot = 2 + types.length;
+      return { columns: [{ header: 'Person', fmt: 'link' }, { header: 'Department' }, ...types.map((t): Column => ({ header: `${t.label} taken`, fmt: 'num' })), { header: 'Total taken', fmt: 'num' }, { header: 'Days left this year', fmt: 'num' }], rows: rows.sort((a, b) => Number(b[tot]) - Number(a[tot])), totals: ['Total', null, ...types.map((_, i) => sum(rows, 2 + i)), sum(rows, tot), null] };
+    } },
+  { key: 'att-miss-punch', module: 'attendance', title: 'Miss-punch requests', about: 'Correction requests raised in the period, person by person. The full history with reasons is under Attendance → Miss-punch report.', filters: ['department', 'person'], allowed: attendanceAllowed,
+    run(app, c) {
+      const p: unknown[] = [c.from, c.to]; const w = who(c, 'r.employee_id', p);
+      const rows = app.db.all<{ id: string; name: string; dept: string; n: number; ok: number; dec: number; wait: number }>(`SELECT e.id, e.full_name AS name, d.name AS dept, COUNT(*) AS n, SUM(CASE WHEN r.status = 'approved' THEN 1 ELSE 0 END) AS ok, SUM(CASE WHEN r.status = 'declined' THEN 1 ELSE 0 END) AS dec, SUM(CASE WHEN r.status IN ('pending','validated') THEN 1 ELSE 0 END) AS wait FROM attendance_regularisations r JOIN employees e ON e.id = r.employee_id JOIN departments d ON d.id = e.department_id WHERE r.date BETWEEN ? AND ?${w} GROUP BY e.id ORDER BY n DESC`, p)
+        .map((r): Cell[] => [link(r.name, `/attendance/miss-punch?employee=${r.id}`), r.dept, r.n, r.ok, r.dec, r.wait]);
+      return { columns: [{ header: 'Person', fmt: 'link' }, { header: 'Department' }, { header: 'Requests', fmt: 'int' }, { header: 'Approved', fmt: 'int' }, { header: 'Declined', fmt: 'int' }, { header: 'Waiting', fmt: 'int' }], rows, totals: ['Total', null, sum(rows, 2), sum(rows, 3), sum(rows, 4), sum(rows, 5)] };
+    } },
+
+  // ===== Hiring =====
+  { key: 'hire-time', module: 'hiring', title: 'Time to hire', about: 'People who accepted an offer or were hired in the period: days from application to offer accepted.', filters: [], allowed: (app, u) => can(app.db, u, 'hire.manage'),
+    run(app, c) {
+      const rows = app.db.all<{ id: string; name: string; role: string; src: string | null; rec: string; acc: string; days: number; joined: string | null }>(`SELECT a.id, cd.full_name AS name, q.title AS role, a.source AS src, date(a.received_at) AS rec, ${ld('o.responded_at')} AS acc, CAST(julianday(o.responded_at) - julianday(a.received_at) AS INTEGER) AS days, o.joining_date AS joined
+        FROM offers o JOIN applications a ON a.id = o.application_id JOIN candidates cd ON cd.id = a.candidate_id JOIN requisitions q ON q.id = a.requisition_id WHERE o.status = 'accepted' AND ${ld('o.responded_at')} BETWEEN ? AND ? ORDER BY o.responded_at DESC`, [c.from, c.to]);
+      const avg = rows.length ? Math.round(rows.reduce((n, r) => n + r.days, 0) / rows.length) : null;
+      return { columns: [{ header: 'Candidate', fmt: 'link' }, { header: 'Vacancy' }, { header: 'Source' }, { header: 'Applied', fmt: 'date' }, { header: 'Accepted', fmt: 'date' }, { header: 'Days', fmt: 'int' }, { header: 'Joining', fmt: 'date' }], rows: rows.map((r): Cell[] => [link(r.name, `/hire/app/${r.id}`), r.role, r.src, r.rec, r.acc, r.days, r.joined]), totals: ['Average', null, null, null, null, avg, null] };
+    } },
+  { key: 'hire-sources', module: 'hiring', title: 'Candidates by source', about: 'Applications received in the period by where the candidate came from, and how far they went.', filters: [], allowed: (app, u) => can(app.db, u, 'hire.manage'),
+    run(app, c) {
+      const i = (s: string): number => HIRE_STAGES.indexOf(s);
+      const apps = app.db.all<{ src: string; stage: string; status: string; outcome: string | null; offer: number }>(`SELECT COALESCE(NULLIF(a.source, ''), 'Not recorded') AS src, a.stage, a.status, a.outcome, (SELECT COUNT(*) FROM offers o WHERE o.application_id = a.id AND o.status IN ('issued','accepted','declined','expired')) AS offer FROM applications a WHERE date(a.received_at) BETWEEN ? AND ?`, [c.from, c.to]);
+      const by = new Map<string, typeof apps>(); for (const a of apps) by.set(a.src, [...(by.get(a.src) || []), a]);
+      const rows = [...by.entries()].map(([src, l]): Cell[] => { const hired = l.filter((a) => i(a.stage) >= i('onboarding')).length; return [src, l.length, l.filter((a) => i(a.stage) >= i('interview')).length, l.filter((a) => a.offer > 0).length, hired, pct(hired, l.length)]; }).sort((a, b) => Number(b[1]) - Number(a[1]));
+      return { columns: [{ header: 'Source' }, { header: 'Applications', fmt: 'int' }, { header: 'Reached interview', fmt: 'int' }, { header: 'Offered', fmt: 'int' }, { header: 'Accepted or hired', fmt: 'int' }, { header: 'Hired of applied', fmt: 'pct' }], rows, totals: ['Total', sum(rows, 1), sum(rows, 2), sum(rows, 3), sum(rows, 4), pct(sum(rows, 4), sum(rows, 1))],
+        chart: { title: 'Applications by source', labels: rows.map((r) => String(r[0])), values: rows.map((r) => Number(r[1])) } };
+    } },
+  { key: 'hire-funnel', module: 'hiring', title: 'Where candidates drop off', about: 'Applications received in the period: how many reached each stage, and how many were closed at that stage.', filters: [], allowed: (app, u) => can(app.db, u, 'hire.manage'),
+    run(app, c) {
+      const apps = app.db.all<{ stage: string; status: string }>('SELECT stage, status FROM applications WHERE date(received_at) BETWEEN ? AND ?', [c.from, c.to]); let prev = apps.length;
+      const rows = HIRE_STAGES.map((s, i): Cell[] => { const n = apps.filter((a) => HIRE_STAGES.indexOf(a.stage) >= i).length; const closedHere = apps.filter((a) => a.stage === s && a.status === 'closed').length; const row: Cell[] = [HIRE_LABEL[s], n, i === 0 ? null : pct(n, prev), closedHere, apps.filter((a) => a.stage === s && a.status !== 'closed').length]; prev = n; return row; });
+      return { columns: [{ header: 'Stage' }, { header: 'Reached', fmt: 'int' }, { header: 'Of the stage before', fmt: 'pct' }, { header: 'Closed at this stage', fmt: 'int' }, { header: 'Here now', fmt: 'int' }], rows, note: `${apps.length} applications were received in the period.`,
+        chart: { title: 'Candidates reaching each stage', labels: rows.map((r) => String(r[0])), values: rows.map((r) => Number(r[1])) } };
+    } },
+  { key: 'hire-offers', module: 'hiring', title: 'Offers', about: 'Offers issued in the period by vacancy, and what became of them.', filters: [], allowed: (app, u) => can(app.db, u, 'hire.manage'),
+    run(app, c) {
+      const rows = app.db.all<{ role: string; n: number; acc: number; dec: number; exp: number; can: number; open: number }>(`SELECT q.title AS role, COUNT(*) AS n, SUM(CASE WHEN o.status = 'accepted' THEN 1 ELSE 0 END) AS acc, SUM(CASE WHEN o.status = 'declined' THEN 1 ELSE 0 END) AS dec, SUM(CASE WHEN o.status = 'expired' THEN 1 ELSE 0 END) AS exp, SUM(CASE WHEN o.status = 'cancelled' THEN 1 ELSE 0 END) AS can, SUM(CASE WHEN o.status = 'issued' THEN 1 ELSE 0 END) AS open
+        FROM offers o JOIN applications a ON a.id = o.application_id JOIN requisitions q ON q.id = a.requisition_id WHERE o.issued_at IS NOT NULL AND ${ld('o.issued_at')} BETWEEN ? AND ? GROUP BY q.id ORDER BY n DESC`, [c.from, c.to]).map((r): Cell[] => [r.role, r.n, r.acc, r.dec, r.exp, r.can, r.open, pct(r.acc, r.acc + r.dec + r.exp)]);
+      return { columns: [{ header: 'Vacancy' }, { header: 'Issued', fmt: 'int' }, { header: 'Accepted', fmt: 'int' }, { header: 'Declined', fmt: 'int' }, { header: 'Expired', fmt: 'int' }, { header: 'Cancelled', fmt: 'int' }, { header: 'Waiting', fmt: 'int' }, { header: 'Accepted of answered', fmt: 'pct' }], rows, totals: ['Total', sum(rows, 1), sum(rows, 2), sum(rows, 3), sum(rows, 4), sum(rows, 5), sum(rows, 6), pct(sum(rows, 2), sum(rows, 2) + sum(rows, 3) + sum(rows, 4))] };
+    } },
+
+  // ===== Appraisals =====
+  { key: 'appr-ratings', module: 'appraisals', title: 'Ratings by department', about: 'Final ratings on appraisals whose cycle ends in the period, department by department.', filters: ['department'], allowed: (app, u) => can(app.db, u, 'appraisals.manage'),
+    run(app, c) {
+      const p: unknown[] = [c.from, c.to]; if (c.departmentId) p.push(c.departmentId);
+      const all = app.db.all<{ dept: string; r: number | null }>(`SELECT d.name AS dept, COALESCE(a.final_rating, a.manager_rating) AS r FROM appraisals a JOIN employees e ON e.id = a.employee_id JOIN departments d ON d.id = e.department_id LEFT JOIN appraisal_cycles cy ON cy.id = a.cycle_id WHERE COALESCE(cy.period_to, a.due_date, date(a.created_at)) BETWEEN ? AND ?${c.departmentId ? ' AND e.department_id = ?' : ''}`, p);
+      const depts = [...new Set(all.map((a) => a.dept))].sort();
+      const rows = depts.map((d): Cell[] => { const l = all.filter((a) => a.dept === d); const rated = l.filter((a) => a.r != null); return [d, l.length, ...RATINGS.map((r) => rated.filter((a) => a.r === r.value).length), l.length - rated.length, rated.length ? r1(rated.reduce((n, a) => n + (a.r as number), 0) / rated.length) : null]; });
+      return { columns: [{ header: 'Department' }, { header: 'Appraisals', fmt: 'int' }, ...RATINGS.map((r): Column => ({ header: `${r.value} · ${r.label}`, fmt: 'int' })), { header: 'Not rated yet', fmt: 'int' }, { header: 'Average', fmt: 'num' }], rows, totals: ['Total', sum(rows, 1), ...RATINGS.map((_, i) => sum(rows, 2 + i)), sum(rows, 2 + RATINGS.length), null] };
+    } },
+  { key: 'appr-increments', module: 'appraisals', title: 'Increments', about: 'Increments decided in the period, person by person.', filters: ['department', 'person'], allowed: (app, u) => can(app.db, u, 'appraisals.manage'),
+    run(app, c) {
+      const p: unknown[] = [c.from, c.to]; const w = who({ ...c, people: null }, 'a.employee_id', p);
+      const rows = app.db.all<{ id: string; eid: string; name: string; dept: string; rating: number | null; pct: number | null; amt: number | null; status: string; at: string | null }>(`SELECT a.id, e.id AS eid, e.full_name AS name, d.name AS dept, a.final_rating AS rating, a.increment_pct AS pct, a.increment_amount AS amt, a.status, ${ld('a.approved_at')} AS at FROM appraisals a JOIN employees e ON e.id = a.employee_id JOIN departments d ON d.id = e.department_id WHERE a.increment_pct IS NOT NULL AND ${ld('COALESCE(a.approved_at, a.updated_at)')} BETWEEN ? AND ?${w} ORDER BY a.increment_amount DESC`, p)
+        .map((r): Cell[] => [link(r.name, `/appraisals/${r.id}`), r.dept, r.rating, r.pct, r.amt == null ? null : Math.round(r.amt), r.at ? 'Approved' : 'Waiting for approval', r.at]);
+      return { columns: [{ header: 'Person', fmt: 'link' }, { header: 'Department' }, { header: 'Rating', fmt: 'int' }, { header: 'Increment', fmt: 'pct' }, { header: 'Increment a year', fmt: 'money' }, { header: 'Status' }, { header: 'Approved', fmt: 'date' }], rows, totals: ['Total', null, null, null, sum(rows, 4), null, null] };
+    } },
+  { key: 'appr-probation', module: 'appraisals', title: 'Probation reviews due', about: 'People whose probation ends in the period, and whether their review has been done.', filters: ['department'], allowed: (app, u) => can(app.db, u, 'appraisals.manage'),
+    run(app, c) {
+      const p: unknown[] = [c.from, c.to]; if (c.departmentId) p.push(c.departmentId);
+      const rows = app.db.all<{ id: string; name: string; dept: string; join: string | null; until: string; mgr: string | null; aid: string | null; status: string | null }>(`SELECT e.id, e.full_name AS name, d.name AS dept, e.join_date AS "join", e.probation_until AS until, m.full_name AS mgr, a.id AS aid, a.status FROM employees e JOIN departments d ON d.id = e.department_id LEFT JOIN employees m ON m.id = e.reporting_manager_id LEFT JOIN appraisals a ON a.employee_id = e.id AND a.kind = 'probation'
+        WHERE e.status = 'active' AND e.probation_until BETWEEN ? AND ?${c.departmentId ? ' AND e.department_id = ?' : ''} ORDER BY e.probation_until`, p).map((r): Cell[] => [link(r.name, `/people/${r.id}`), r.dept, r.join, r.until, r.mgr, r.aid ? (r.status === 'closed' || r.status === 'approved' ? 'Review done' : `Review in progress · ${r.status}`) : 'Review not started']);
+      return { columns: [{ header: 'Person', fmt: 'link' }, { header: 'Department' }, { header: 'Joined', fmt: 'date' }, { header: 'Probation ends', fmt: 'date' }, { header: 'Manager' }, { header: 'Review' }], rows };
+    } },
+
+  // ===== SOPs =====
+  { key: 'sop-compliance', module: 'sops', title: 'Checklist compliance', about: 'Checklists due in the period, by SOP: done in time, done late, and not done.', filters: ['department'], allowed: (app, u) => can(app.db, u, 'sops.manage'),
+    run(app, c) {
+      const p: unknown[] = [new Date().toISOString(), c.from, c.to]; if (c.departmentId) p.push(c.departmentId);
+      const rows = app.db.all<{ name: string; dept: string | null; n: number; ok: number; late: number; missed: number }>(`SELECT s.name, d.name AS dept, COUNT(*) AS n, SUM(CASE WHEN i.status = 'complete' AND i.completed_at <= i.due_at THEN 1 ELSE 0 END) AS ok, SUM(CASE WHEN i.status = 'complete' AND i.completed_at > i.due_at THEN 1 ELSE 0 END) AS late, SUM(CASE WHEN i.status != 'complete' AND i.due_at < ? THEN 1 ELSE 0 END) AS missed
+        FROM sop_instances i JOIN sop_definitions s ON s.id = i.sop_id LEFT JOIN departments d ON d.id = i.department_id WHERE i.date BETWEEN ? AND ?${c.departmentId ? ' AND i.department_id = ?' : ''} GROUP BY s.id ORDER BY missed DESC, late DESC`, p).map((r): Cell[] => [r.name, r.dept, r.n, r.ok, r.late, r.missed, pct(r.ok, r.n)]);
+      return { columns: [{ header: 'SOP' }, { header: 'Department' }, { header: 'Checklists due', fmt: 'int' }, { header: 'Done in time', fmt: 'int' }, { header: 'Done late', fmt: 'int' }, { header: 'Not done', fmt: 'int' }, { header: 'In time', fmt: 'pct' }], rows, totals: ['Total', null, sum(rows, 2), sum(rows, 3), sum(rows, 4), sum(rows, 5), pct(sum(rows, 3), sum(rows, 2))] };
+    } },
+  { key: 'sop-by-person', module: 'sops', title: 'Checklists by person', about: 'Checklists due in the period for each person.', filters: ['department', 'person'], allowed: (app, u) => can(app.db, u, 'sops.manage'),
+    run(app, c) {
+      const p: unknown[] = [new Date().toISOString(), c.from, c.to]; const w = who(c, 'i.assignee_id', p);
+      const rows = app.db.all<{ id: string; name: string; n: number; ok: number; late: number; missed: number }>(`SELECT e.id, e.full_name AS name, COUNT(*) AS n, SUM(CASE WHEN i.status = 'complete' AND i.completed_at <= i.due_at THEN 1 ELSE 0 END) AS ok, SUM(CASE WHEN i.status = 'complete' AND i.completed_at > i.due_at THEN 1 ELSE 0 END) AS late, SUM(CASE WHEN i.status != 'complete' AND i.due_at < ? THEN 1 ELSE 0 END) AS missed FROM sop_instances i JOIN employees e ON e.id = i.assignee_id WHERE i.date BETWEEN ? AND ?${w} GROUP BY e.id ORDER BY missed DESC, late DESC`, p)
+        .map((r): Cell[] => [link(r.name, `/people/${r.id}`), r.n, r.ok, r.late, r.missed, pct(r.ok, r.n)]);
+      return { columns: [{ header: 'Person', fmt: 'link' }, { header: 'Checklists due', fmt: 'int' }, { header: 'Done in time', fmt: 'int' }, { header: 'Done late', fmt: 'int' }, { header: 'Not done', fmt: 'int' }, { header: 'In time', fmt: 'pct' }], rows, totals: ['Total', sum(rows, 1), sum(rows, 2), sum(rows, 3), sum(rows, 4), pct(sum(rows, 2), sum(rows, 1))] };
+    } },
+
+  // ===== Approvals =====
+  { key: 'approvals-waiting', module: 'approvals', title: 'How long approvals wait', about: 'Approval requests raised in the period, by kind and by approver: how many were decided, how long they took, and what is still waiting.', filters: [], allowed: managerOrAbove,
+    run(app, c) {
+      const rows = app.db.all<{ type: string; name: string | null; n: number; ok: number; dec: number; wait: number; h: number | null; oldest: number | null }>(`SELECT t.type, e.full_name AS name, COUNT(*) AS n, SUM(CASE WHEN t.status = 'approved' THEN 1 ELSE 0 END) AS ok, SUM(CASE WHEN t.status = 'declined' THEN 1 ELSE 0 END) AS dec, SUM(CASE WHEN t.status = 'open' THEN 1 ELSE 0 END) AS wait,
+        AVG(CASE WHEN t.decided_at IS NOT NULL THEN (julianday(t.decided_at) - julianday(t.created_at)) * 24 END) AS h, MAX(CASE WHEN t.status = 'open' THEN julianday('now') - julianday(t.created_at) END) AS oldest FROM tasks t LEFT JOIN employees e ON e.id = t.assignee_id WHERE t.kind = 'approval' AND ${ld('t.created_at')} BETWEEN ? AND ? GROUP BY t.type, t.assignee_id ORDER BY wait DESC, n DESC`, [c.from, c.to])
+        .map((r): Cell[] => [r.type.replace(/_/g, ' ').replace(/^./, (x) => x.toUpperCase()), r.name, r.n, r.ok, r.dec, r.wait, r1(r.h), r.oldest == null ? null : r1(r.oldest)]);
+      return { columns: [{ header: 'Kind of request' }, { header: 'With' }, { header: 'Requests', fmt: 'int' }, { header: 'Approved', fmt: 'int' }, { header: 'Declined', fmt: 'int' }, { header: 'Waiting now', fmt: 'int' }, { header: 'Average hours to decide', fmt: 'num' }, { header: 'Oldest waiting (days)', fmt: 'num' }], rows, totals: ['Total', null, sum(rows, 2), sum(rows, 3), sum(rows, 4), sum(rows, 5), null, null] };
+    } },
+
+  // ===== Daily review =====
+  { key: 'dsr-by-day', module: 'dsr', title: 'Daily review by day', about: 'Each team and day: what was planned, how it ended, what moved to the next day, and for sales the amount expected against the amount collected.', filters: ['department'], allowed: (app, u) => managerOrAbove(app, u) || scopeFor(app.db, u).level !== 'self',
+    run(app, c) {
+      const p: unknown[] = [c.from, c.to]; const w = who(c, 'i.employee_id', p, { deptVia: 'i.department_id' });
+      const rows = app.db.all<{ day: string; team: string; n: number; done: number; part: number; nd: number; wait: number; carried: number; exp: number; got: number; closed: number }>(`SELECT i.day, d.name AS team, COUNT(*) AS n, SUM(i.status = 'done') AS done, SUM(i.status = 'partial') AS part, SUM(i.status IN ('not_done', 'blocked')) AS nd, SUM(i.status = 'planned') AS wait,
+        SUM(i.carried_to IS NOT NULL) AS carried, COALESCE(SUM(i.amount_expected), 0) AS exp, COALESCE(SUM(i.amount_actual), 0) AS got, MAX(COALESCE((SELECT y.status = 'closed' FROM dsr_days y WHERE y.department_id = i.department_id AND y.day = i.day), 0)) AS closed
+        FROM dsr_items i JOIN departments d ON d.id = i.department_id WHERE i.day BETWEEN ? AND ?${w} GROUP BY i.day, i.department_id ORDER BY i.day DESC, d.name`, p)
+        .map((r): Cell[] => [r.day, r.team, r.closed ? 'Closed' : 'Open', r.n, r.done, r.part, r.nd, r.wait, r.carried, Math.round(r.exp), Math.round(r.got), pct(r.done, r.n)]);
+      const byDay = new Map<string, [number, number]>(); for (const r of rows) { const v = byDay.get(String(r[0])) || [0, 0]; v[0] += Number(r[4]); v[1] += Number(r[3]); byDay.set(String(r[0]), v); }
+      const days = [...byDay.keys()].sort().slice(-14);
+      return { columns: [{ header: 'Day', fmt: 'date' }, { header: 'Team' }, { header: 'Sheet' }, { header: 'Planned', fmt: 'int' }, { header: 'Done', fmt: 'int' }, { header: 'Partly done', fmt: 'int' }, { header: 'Not done or blocked', fmt: 'int' }, { header: 'Not reviewed', fmt: 'int' }, { header: 'Moved to next day', fmt: 'int' }, { header: 'Expected', fmt: 'money' }, { header: 'Collected', fmt: 'money' }, { header: 'Done rate', fmt: 'pct' }], rows,
+        totals: ['Total', null, null, sum(rows, 3), sum(rows, 4), sum(rows, 5), sum(rows, 6), sum(rows, 7), sum(rows, 8), sum(rows, 9), sum(rows, 10), pct(sum(rows, 4), sum(rows, 3))],
+        chart: { title: 'Lines done each day', labels: days.map((x) => x.slice(8) + '/' + x.slice(5, 7)), values: days.map((x) => byDay.get(x)![0]) } };
+    } },
+  { key: 'dsr-by-person', module: 'dsr', title: 'Daily review by person', about: 'For each person in the period: lines planned, done, partly done and not done, how often work moved to the next day, planned hours, and collections expected and received.', filters: ['department', 'person'], allowed: (app, u) => managerOrAbove(app, u) || scopeFor(app.db, u).level !== 'self',
+    run(app, c) {
+      const p: unknown[] = [c.from, c.to]; const w = who(c, 'i.employee_id', p, { deptVia: 'i.department_id' });
+      const rows = app.db.all<{ id: string; name: string; team: string; days: number; n: number; done: number; part: number; nd: number; carried: number; h: number; exp: number; got: number }>(`SELECT e.id, e.full_name AS name, d.name AS team, COUNT(DISTINCT i.day) AS days, COUNT(*) AS n, SUM(i.status = 'done') AS done, SUM(i.status = 'partial') AS part, SUM(i.status IN ('not_done', 'blocked')) AS nd,
+        SUM(i.carried_to IS NOT NULL) AS carried, COALESCE(SUM(i.planned_hours), 0) AS h, COALESCE(SUM(i.amount_expected), 0) AS exp, COALESCE(SUM(i.amount_actual), 0) AS got
+        FROM dsr_items i JOIN employees e ON e.id = i.employee_id JOIN departments d ON d.id = i.department_id WHERE i.day BETWEEN ? AND ?${w} GROUP BY e.id, i.department_id ORDER BY done DESC, e.full_name`, p)
+        .map((r): Cell[] => [{ text: r.name, href: `/people/${r.id}` }, r.team, r.days, r.n, r.done, r.part, r.nd, r.carried, r1(r.h), Math.round(r.exp), Math.round(r.got), pct(r.done, r.n)]);
+      return { columns: [{ header: 'Person' }, { header: 'Team' }, { header: 'Days', fmt: 'int' }, { header: 'Planned', fmt: 'int' }, { header: 'Done', fmt: 'int' }, { header: 'Partly done', fmt: 'int' }, { header: 'Not done or blocked', fmt: 'int' }, { header: 'Moved to next day', fmt: 'int' }, { header: 'Planned hours', fmt: 'num' }, { header: 'Expected', fmt: 'money' }, { header: 'Collected', fmt: 'money' }, { header: 'Done rate', fmt: 'pct' }], rows,
+        totals: ['Total', null, null, sum(rows, 3), sum(rows, 4), sum(rows, 5), sum(rows, 6), sum(rows, 7), r1(sum(rows, 8)), sum(rows, 9), sum(rows, 10), pct(sum(rows, 4), sum(rows, 3))],
+        chart: { title: 'Lines done by person', labels: rows.slice(0, 15).map((r) => (r[0] as { text: string }).text), values: rows.slice(0, 15).map((r) => Number(r[4])) } };
+    } },
+
+  // ===== Administration =====
+  { key: 'admin-audit', module: 'admin', title: 'Who changed what', about: 'Every recorded change in the period, newest first: settings, roles, salaries, records. Shows up to 1,000 lines.', filters: ['person'], allowed: (app, u) => can(app.db, u, 'settings.admin'),
+    run(app, c) {
+      const p: unknown[] = [c.from, c.to]; if (c.personId) p.push(c.personId);
+      const rows = app.db.all<{ at: string; name: string | null; entity: string; entity_id: string; action: string }>(`SELECT a.at, e.full_name AS name, a.entity, a.entity_id, a.action FROM audit_log a LEFT JOIN employees e ON e.id = a.actor_id WHERE ${ld('a.at')} BETWEEN ? AND ?${c.personId ? ' AND a.actor_id = ?' : ''} ORDER BY a.id DESC LIMIT 1000`, p)
+        .map((r): Cell[] => [r.at.slice(0, 16).replace('T', ' ') + ' UTC', r.name || 'System or customer', r.entity.replace(/_/g, ' '), r.entity_id, r.action.replace(/_/g, ' ')]);
+      const by = new Map<string, number>(); for (const r of rows) by.set(String(r[2]), (by.get(String(r[2])) || 0) + 1);
+      const top = [...by.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+      return { columns: [{ header: 'When' }, { header: 'Who' }, { header: 'What' }, { header: 'Which one' }, { header: 'Change' }], rows, chart: { title: 'Changes by kind of record', labels: top.map((t) => t[0]), values: top.map((t) => t[1]) } };
+    } }
+];
+
+export function reportsFor(app: App, user: Employee): ReportDef[] { return REPORTS.filter((r) => r.allowed(app, user)); }
+export function getReport(key: string): ReportDef | undefined { return REPORTS.find((r) => r.key === key); }
+
+/** Default period: the last three whole months plus this month so far. */
+export function defaultRange(now = new Date()): { from: string; to: string } {
+  const today = localDateString(now); const y = Number(today.slice(0, 4)), m = Number(today.slice(5, 7)); const sm = m - 3;
+  const from = sm >= 1 ? `${y}-${String(sm).padStart(2, '0')}-01` : `${y - 1}-${String(sm + 12).padStart(2, '0')}-01`;
+  return { from, to: today };
+}
+export function runReport(app: App, user: Employee, def: ReportDef, q: { from?: string; to?: string; departmentId?: string; personId?: string }): { result: ReportResult; ctx: RunCtx } {
+  const d = defaultRange(); const ok = (s: string | undefined): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+  let from = ok(q.from) ? q.from : d.from; let to = ok(q.to) ? q.to : d.to; if (from > to) [from, to] = [to, from];
+  const scope = scopeFor(app.db, user);
+  // Managers see their team; everyone-scope and the module's managers see all. Reports that list individuals honour this.
+  const wide = scope.level === 'company' || (def.module === 'sales' && can(app.db, user, 'sales.manage')) || (def.module === 'attendance' && can(app.db, user, 'attendance.manage')) || (def.module === 'support' && can(app.db, user, 'desk.manage'));
+  const ctx: RunCtx = { from, to, departmentId: def.filters.includes('department') ? q.departmentId || '' : '', personId: def.filters.includes('person') ? q.personId || '' : '', people: wide ? null : scope.people, viewer: user };
+  return { result: def.run(app, ctx), ctx };
+}
+void addDays;
