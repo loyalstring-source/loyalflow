@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.18.0 — 24 Nov 2026
+Readiness check before hosting, and a fuller demo.
+- **Every screen checked as every kind of user.** A new check (`node tests/crawl.ts demo` or `real`) signs in as 11 kinds of people and opens every link the screens offer: about 6,000 page loads on demo data and 5,400 on an empty real system. It found no crashes. It did find links that led to "not allowed" pages; those are fixed:
+  - A KPI's "look at one department" list now shows only the departments you may open, and the "Company page" button appears only if you may open it.
+  - On a person's profile, the open tickets and open deals figures link only if you have Support or Sales; HR can open the detail behind a person's KPI tiles.
+  - People who are not on any interview panel now get an explanation on Hiring instead of an error.
+  - HR and Accounts are told where statutory rates are set instead of being sent to a page they cannot open; HR can open their own draft payslip.
+- **Type check is clean** and the four browser tests left behind by the redesign are updated. All 174 tests and 18 browser tests pass.
+- **Demo data for the newer screens** (demo mode only, never on a real system): six sample products and an estimate sent to a customer; eight working days of daily review for Development, Support and Sales; six months of history so month-by-month graphs have a shape; monthly targets set so the overview shows a mix of outlooks; attendance filled up to today each time the demo starts.
+
 ## 1.17.1 — 16 Nov 2026
 Graphs at the top of the overview.
 - **One graph card per team, first thing on the page**, in the chart-wall format: team and title, "Open report", a headline figure with its outlook, the chart and a legend.

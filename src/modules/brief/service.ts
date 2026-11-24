@@ -1,5 +1,6 @@
 // Company overview ("morning brief") for the people who run the company, and the monthly targets behind it.
 // One measure is one line on the overview. Each has a monthly target that the team's manager sets.
+import type { Params } from '../../db/index.ts';
 import type { App } from '../../app.ts';
 import { HttpError } from '../../lib/http.ts';
 import { audit } from '../../lib/audit.ts';
@@ -18,7 +19,7 @@ export interface Measure {
   actual(app: App, from: string, to: string): number | null;
 }
 interface Dept { id: string; name: string; code: string; hod_id: string | null; head: string | null }
-const one = (app: App, sql: string, p: unknown[]): Record<string, number | null> => app.db.get<Record<string, number | null>>(sql, p) || {};
+const one = (app: App, sql: string, p: Params): Record<string, number | null> => app.db.get<Record<string, number | null>>(sql, p) || {};
 const rate = (num: number | null | undefined, den: number | null | undefined): number | null => (den ? Math.round(((num || 0) / den) * 1000) / 10 : null);
 
 export function departments(app: App): Dept[] { return app.db.all<Dept>('SELECT d.id, d.name, d.code, d.hod_id, e.full_name AS head FROM departments d LEFT JOIN employees e ON e.id = d.hod_id ORDER BY d.name'); }
@@ -202,7 +203,7 @@ function judge(m: Measure, target: number, mtd: number | null, projected: number
   const near = m.kind === 'rate' ? projected >= target * 0.95 : projected >= target * 0.9;
   return { tone: near ? 'warn' : 'crit', status: near ? 'Watch' : 'Behind', outlook: `Short by ${gap(m.unit, target - projected)}` };
 }
-const count = (app: App, sql: string, p: unknown[] = []): number => app.db.get<{ n: number }>(sql, p)?.n || 0;
+const count = (app: App, sql: string, p: Params = []): number => app.db.get<{ n: number }>(sql, p)?.n || 0;
 
 export function buildBrief(app: App, viewer: Employee, now = new Date()): Brief {
   const day = today(now); const month = monthOf(day); const mFrom = monthFirst(month); const mTo = monthLast(month);
@@ -273,7 +274,7 @@ export function buildBrief(app: App, viewer: Employee, now = new Date()): Brief 
 
   // This week against last week.
   const upTo = weekTo < day ? weekTo : day; const TW = [weekFrom, upTo]; const LW = [lastFrom, lastTo];
-  const v = (sql: string, p: unknown[]): number => (app.db.get<{ v: number | null }>(sql, p)?.v || 0);
+  const v = (sql: string, p: Params): number => (app.db.get<{ v: number | null }>(sql, p)?.v || 0);
   const wonSql = `SELECT COALESCE(SUM(d.value * (1 - COALESCE(d.discount_pct, 0) / 100.0)), 0) AS v FROM deals d WHERE d.stage = 'won' AND ${ld('d.won_at')} BETWEEN ? AND ?`;
   const collSql = "SELECT COALESCE(SUM(COALESCE(amount_actual, self_amount, 0)), 0) AS v FROM dsr_items WHERE kind = 'collection' AND day BETWEEN ? AND ?";
   const closedSql = `SELECT COUNT(*) AS v FROM tickets WHERE resolved_at IS NOT NULL AND ${ld('resolved_at')} BETWEEN ? AND ?`;
@@ -296,7 +297,7 @@ export function buildBrief(app: App, viewer: Employee, now = new Date()): Brief 
   const six = [5, 4, 3, 2, 1, 0].map((k) => addMonths(month, -k)); const sixLabels = six.map((x) => monthName(x));
   const tone = (r: Row | undefined): ChartCard['subTone'] => (!r || r.tone === 'ink' ? 'muted' : r.tone === 'good' ? 'up' : 'dn');
   const ymOf = (col: string): string => `strftime('%Y-%m', ${col}, ${TZ})`;
-  const byMonth = (sql: string, p: unknown[] = []): number[] => { const m = new Map(app.db.all<{ m: string; n: number }>(sql, [...p, monthFirst(six[0]), mTo]).map((x) => [x.m, x.n])); return six.map((x) => m.get(x) || 0); };
+  const byMonth = (sql: string, p: Params = []): number[] => { const m = new Map(app.db.all<{ m: string; n: number }>(sql, [...p, monthFirst(six[0]), mTo]).map((x) => [x.m, x.n])); return six.map((x) => m.get(x) || 0); };
   const cardOrder = ['SAL', 'SUP', 'DEV', 'QA', 'PRD', 'PRE', 'DM', 'HR', 'ACC']; const rk = (c: string): number => (cardOrder.indexOf(c) < 0 ? 99 : cardOrder.indexOf(c));
   for (const d of [...sees].sort((x, y) => rk(x.code) - rk(y.code))) {
     const mine = rows.filter((r) => r.teamId === d.id); const first = mine[0];

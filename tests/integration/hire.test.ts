@@ -19,7 +19,9 @@ describe('candidate privacy', () => {
     const a = listApplications(s.app, { limit: 1 })[0];
     assert.equal((await ic.get('/hire/candidates')).status, 403);
     assert.equal((await ic.get(`/hire/app/${a.id}`)).status, 403);
-    assert.equal((await ic.get('/hire')).status, 403, 'the hiring area itself is closed to them');
+    const area = await ic.get('/hire'); const text = await area.text();
+    assert.equal(area.status, 200); assert.match(text, /Hiring is run by HR/, 'the hiring area tells them so');
+    assert.ok(!text.includes(a.id) && !text.includes(`/hire/app/`) && !text.includes('/hire/candidates'), 'and shows no candidate or vacancy');
   });
   test('somebody on the panel can see that one application and nothing else', async () => {
     const interview = listInterviews(s.app, { limit: 5 })[0];

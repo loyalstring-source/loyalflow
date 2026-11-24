@@ -5,6 +5,7 @@ import { createApp } from './app.ts';
 import { seedMaster } from './db/seed-master.ts';
 import { seedBulk } from './db/seed-bulk.ts';
 import { seedDemo } from './db/seed-demo.ts';
+import { seedDemoExtras } from './db/seed-demo-extras.ts';
 import { setPassword } from './lib/auth.ts';
 import { getEmployeeByEmail } from './modules/people/model.ts';
 import { snapshotNow } from './modules/kpi/engine.ts';
@@ -20,7 +21,7 @@ async function main(): Promise<void> {
     case 'seed': {
       const r = seedMaster(app);
       console.log(`Master data ready: ${r.employees} employees, ${app.db.get<{ n: number }>('SELECT count(*) AS n FROM departments')?.n} departments.`);
-      if (wantDemo) { seedDemo(app); console.log('Demo data loaded.'); }
+      if (wantDemo) { seedDemo(app); seedDemoExtras(app); console.log('Demo data loaded.'); }
       else console.log('No demo data. Add --demo for the sample customers, tickets, deals and work orders.');
       generateInstances(app);
       snapshotNow(app);

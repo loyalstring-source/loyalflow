@@ -12,6 +12,7 @@ import { getDepartment, type Employee } from './modules/people/model.ts';
 import { unreadCount } from './lib/notify.ts';
 import { seedMaster } from './db/seed-master.ts';
 import { seedDemo } from './db/seed-demo.ts';
+import { seedDemoExtras } from './db/seed-demo-extras.ts';
 import { generateInstances } from './modules/sops/service.ts';
 import { snapshotNow } from './modules/kpi/engine.ts';
 import { createScheduler } from './jobs.ts';
@@ -203,6 +204,8 @@ export function prepareData(app: App, log: (line: string) => void): void {
   const employees = app.db.get<{ n: number }>('SELECT count(*) AS n FROM employees')?.n || 0;
   if (!employees) { const r = seedMaster(app, { password: app.cfg.seedPassword, mustChange: !app.cfg.demo }); log(`Seeded master data: ${r.employees} employees. Starter password: ${app.cfg.seedPassword}`); }
   if (app.cfg.demo && !(app.db.get<{ n: number }>('SELECT count(*) AS n FROM customers')?.n || 0)) { seedDemo(app); log('Seeded demo data (LOYALFLOW_DEMO=1).'); }
+  // Sample data for the newer screens; each part loads only if that part is still empty, so an older demo database is topped up too.
+  if (app.cfg.demo) seedDemoExtras(app);
   const created = generateInstances(app);
   if (created) log(`Created ${created} SOP checklists for today.`);
   snapshotNow(app);

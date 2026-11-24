@@ -19,6 +19,8 @@ import { screeningFor, planTrack, planOf, setFor, screeningTotals } from '../mod
 import { cvOf, aiSettings } from '../modules/hr/cv.ts';
 import { screeningCard, planCard, cvCard, vacancyExtras } from '../ui/pages/hire-extra.ts';
 import { html, when } from '../lib/html.ts';
+import { page } from '../ui/layout.ts';
+import { empty } from '../ui/components.ts';
 import { done, fail, view, user, str, num } from './helpers.ts';
 
 function requireRecruiter(app: App, e: Employee): void {
@@ -34,7 +36,7 @@ export function register(r: Router<Employee>, app: App): void {
     const v = view(ctx); const me = v.user; const rec = isRecruiter(app, me);
     const mine = listInterviews(app, { interviewerId: me.id, from: new Date(Date.now() - 86_400_000).toISOString(), limit: 20 }).filter((i) => i.status === 'scheduled');
     const due = listInterviews(app, { interviewerId: me.id, limit: 50 }).filter((i) => i.status === 'completed' && !myScorecard(app, i.id, me.id)?.submitted_at);
-    if (!rec && !mine.length && !due.length && !listInterviews(app, { interviewerId: me.id, limit: 1 }).length) throw new HttpError(403, 'Hiring is run by HR. You will see a candidate here when you are put on a panel.');
+    if (!rec && !mine.length && !due.length && !listInterviews(app, { interviewerId: me.id, limit: 1 }).length) return htmlResponse(page(v, { title: 'Hiring', navTab: 'hire', subtitle: 'Hiring is run by HR.', body: empty('You will see a candidate here when HR puts you on an interview panel.', '👥') }));
     if (rec) expireOffers(app);
     return htmlResponse(hirePage(v, {
       holds: rec ? holdQueue(app) : [], onboarding: rec ? onboardingQueue(app) : [],

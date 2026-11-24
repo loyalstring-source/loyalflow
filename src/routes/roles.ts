@@ -1,4 +1,5 @@
 // Settings → Roles and permissions.
+import type { Params } from '../db/index.ts';
 import type { App } from '../app.ts';
 import { Router, htmlResponse } from '../lib/http.ts';
 import { type Employee, getEmployee } from '../modules/people/model.ts';
@@ -19,7 +20,7 @@ export function register(r: Router<Employee>, app: App): void {
     const q = (ctx.query.get('q') || '').trim(); const dept = ctx.query.get('dept') || '';
     let people: PersonRow[] = []; let total = 0; let pageNo = 1; let pages = 1;
     if (tab === 'people') {
-      const where = ["e.status = 'active'"]; const args: unknown[] = [];
+      const where = ["e.status = 'active'"]; const args: Params = [];
       if (q) { where.push('lower(e.full_name) LIKE ?'); args.push(`%${q.toLowerCase()}%`); }
       if (dept) { where.push('e.department_id = ?'); args.push(dept); }
       total = db.get<{ n: number }>(`SELECT COUNT(*) AS n FROM employees e WHERE ${where.join(' AND ')}`, args)!.n;

@@ -1,7 +1,7 @@
 import { test, expect } from 'playwright/test';
 import { login, BDM, SUPPORT_LEAD, SUPPORT_IC, PRODUCTION_LEAD } from './helpers.ts';
 
-test('BDM: new lead, exit rules, quote routing and a visit with location', async ({ page, context }) => {
+test('BDM: new lead, exit rules, estimates on the deal and a visit with location', async ({ page, context }) => {
   await context.grantPermissions(['geolocation']);
   await context.setGeolocation({ latitude: 18.5204, longitude: 73.8567 });
   await login(page, BDM);
@@ -35,13 +35,9 @@ test('BDM: new lead, exit rules, quote routing and a visit with location', async
   await page.waitForLoadState('networkidle');
 
   await page.locator('.kcard', { hasText: 'E2E Plastics' }).first().click();
-  await drawer.getByText('Quote and discount').click();
-  await drawer.locator('#f-discountPct').fill('14');
-  await drawer.locator('form[action$="/quote"] button[type=submit]').click();
-  await expect(page.locator('.toast')).toContainText('sent for approval');
-  await page.waitForLoadState('networkidle');
-
-  await page.locator('.kcard', { hasText: 'E2E Plastics' }).first().click();
+  // Quotes are now estimates: the deal offers one, and its discount routing is covered in tests/integration/estimates.test.ts.
+  await expect(drawer.getByRole('heading', { name: 'Estimates' })).toBeVisible();
+  await expect(drawer).toContainText('No estimate yet');
   await drawer.locator('[data-chips="kind"] .chip', { hasText: 'Visit' }).click();
   await drawer.locator('#f-notes').fill('Met the plant head');
   await drawer.locator('form[action$="/activity"] button[type=submit]').click();

@@ -46,7 +46,7 @@ export function pipelinePage(v: View, d: PipelineData): Raw {
   });
 }
 
-export interface DealDetail { d: Deal; activities: Activity[]; quotes: { id: string; version: number; currency: string; list_total: number; discount_pct: number; total: number; status: string; created_at: string }[]; now: Date; canWrite: boolean; canManage: boolean; estimates: Estimate[]; canEditEstimate: boolean; owners: Employee[]; customer: Customer | null; discountRule: string }
+export interface DealDetail { canOpenEstimate?: boolean; d: Deal; activities: Activity[]; quotes: { id: string; version: number; currency: string; list_total: number; discount_pct: number; total: number; status: string; created_at: string }[]; now: Date; canWrite: boolean; canManage: boolean; estimates: Estimate[]; canEditEstimate: boolean; owners: Employee[]; customer: Customer | null; discountRule: string }
 
 function dealBody(v: View, x: DealDetail, sideActivity = false): Raw {
   const d = x.d;
@@ -75,7 +75,7 @@ function dealBody(v: View, x: DealDetail, sideActivity = false): Raw {
           <div class="grid grid-3">${field('Deal title / product', input('title', { value: d.title }))}${field('List value', input('value', { type: 'number', value: d.value, min: 0, step: 1 }))}${field('Expected close', input('expected_close', { type: 'date', value: d.expected_close ? d.expected_close.slice(0, 10) : '' }))}</div>
           <div class="grid grid-2">${when(x.canManage, field('Owner', select('owner_id', x.owners.map((o) => ({ value: o.id, label: o.full_name, selected: o.id === d.owner_id })))))}<label class="row" style="gap:10px;align-items:center;padding-top:26px"><input type="checkbox" name="po_received" ${when(d.po_received, 'checked')} style="width:20px;height:20px;accent-color:var(--good)"> PO or advance received</label></div>
           <div class="row" style="justify-content:flex-end"><button class="btn" type="submit">Save details</button></div></form></details>
-      ${dealEstimatesCard({ dealId: d.id, estimates: x.estimates, canEdit: x.canEditEstimate, open: true })}
+      ${dealEstimatesCard({ dealId: d.id, estimates: x.estimates, canEdit: x.canEditEstimate, open: true, canOpen: x.canOpenEstimate })}
       <details class="card" style="padding:14px 16px"><summary style="cursor:pointer;font-weight:600">Quick figure without an estimate</summary><p class="small muted" style="margin-top:8px">Use this only when there is no product list to quote from. An estimate sets these figures for you.</p>
         <form class="form" data-ajax action="/deals/${d.id}/quote" style="margin-top:12px"><div class="grid grid-3">${field('List total', input('listTotal', { type: 'number', value: d.value, min: 0, step: 1, required: true }))}${field('Discount %', input('discountPct', { type: 'number', value: d.discount_pct, min: 0, max: 50, step: 0.5 }))}${field('Currency', select('currency', lists.options('sales.currencies', d.currency)))}</div>
           <p class="small muted">${x.discountRule}</p><div class="row" style="justify-content:flex-end"><button class="btn btn-primary" type="submit">Create quote</button></div></form>

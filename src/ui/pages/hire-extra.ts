@@ -71,7 +71,7 @@ export function planCard(d: { a: Application; steps: PlanTrackStep[]; next: Plan
   const tone = (s: PlanTrackStep) => s.state === 'done' ? (s.proceed === false ? 'crit' : 'good') : s.state === 'scheduled' ? 'accent' : s.state === 'next' ? 'violet' : 'ink';
   const label = (s: PlanTrackStep) => s.state === 'done' ? (s.interview!.status === 'no_show' ? 'No show' : s.proceed === false ? 'Done · not to proceed' : s.proceed === null ? 'Done · scorecard awaited' : 'Done · proceed') : s.state === 'scheduled' ? `Scheduled ${fmtDateTime(s.interview!.starts_at)}` : s.state === 'next' ? 'Next' : 'Later';
   return html`<section class="card">
-    <div class="card-head"><h2>Interview plan</h2><a class="small" href="/hire/req/${d.a.requisition_id}/plan" data-modal="/hire/req/${d.a.requisition_id}/plan">${d.canEdit ? 'Change plan' : ''}</a></div>
+    <div class="card-head"><h2>Interview plan</h2>${when(d.canEdit, () => html`<a class="small" href="/hire/req/${d.a.requisition_id}/plan" data-modal="/hire/req/${d.a.requisition_id}/plan">Change plan</a>`)}</div>
     <div class="list" style="margin-top:6px">${d.steps.map((s) => html`<div class="list-row" style="align-items:center">
       <span><b class="small">${s.round}. ${s.name}</b><br><span class="xs muted">${s.interview ? (s.interview.panel || []).map((p) => p.name).join(', ') : s.interviewerName || 'Interviewer not set'}</span></span>
       <span class="row" style="gap:8px">${pill(label(s), tone(s))}${when(s.interview, () => html`<a class="btn btn-sm" href="/hire/interview/${s.interview!.id}">Open</a>`)}

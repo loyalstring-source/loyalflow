@@ -43,7 +43,7 @@ export function buildPipeline(app: App, me: Employee, q: URLSearchParams, now = 
 
 export function dealDetail(app: App, me: Employee, id: string, now = new Date()): DealDetail {
   const d = requireDeal(app, id);
-  return { d, activities: listActivities(app, { dealId: id, limit: 100 }), quotes: listQuotes(app, id), estimates: estimatesOfDeal(app, id), canEditEstimate: canEditEstimate(app, me, d), now, canWrite: can(app.db, me, 'sales.write'), canManage: can(app.db, me, 'sales.manage'), owners: salesPeople(app), customer: getCustomer(app, d.customer_id) || null, discountRule: discountRule(app) };
+  return { d, activities: listActivities(app, { dealId: id, limit: 100 }), quotes: listQuotes(app, id), estimates: estimatesOfDeal(app, id), canEditEstimate: canEditEstimate(app, me, d), canOpenEstimate: (() => { const sc = scopeFor(app.db, me); return sc.level === 'company' || can(app.db, me, 'sales.manage') || sc.people.has(d.owner_id || ''); })(), now, canWrite: can(app.db, me, 'sales.write'), canManage: can(app.db, me, 'sales.manage'), owners: salesPeople(app), customer: getCustomer(app, d.customer_id) || null, discountRule: discountRule(app) };
 }
 
 export function register(r: Router<Employee>, app: App): void {

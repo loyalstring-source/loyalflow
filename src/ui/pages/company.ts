@@ -5,6 +5,7 @@ import type { Tile, Band, Rag, SeriesPoint, KpiDef, KpiScope } from '../../modul
 import { formatValue } from '../../modules/kpi/engine.ts';
 import type { Department, Employee } from '../../modules/people/model.ts';
 import { fiscalYear } from '../../lib/time.ts';
+import { can } from '../../lib/scope.ts';
 
 export interface CompanyData {
   now: Date; week: string; bands: { band: Band; name: string; owners: string; tiles: Tile[] }[];
@@ -73,7 +74,7 @@ export function kpiDetailPage(v: View, d: KpiDetailData): Raw {
   return page(v, {
     title: d.def.name, docTitle: d.def.name,
     subtitle: html`${d.scopeName} · ${d.def.band} band · owned by ${d.def.ownerDept} · ${d.def.source === 'manual' ? 'entered weekly' : 'computed live'}`,
-    actions: html`${button('Company page', { href: '/company', icon: 'grid', kind: 'ghost' })}`,
+    actions: html`${when(can(v.app.db, v.user, 'reports.company'), () => button('Company page', { href: '/company', icon: 'grid', kind: 'ghost' }))}`,
     body: html`
       <div class="cols"><div class="col-main">
         <section class="card"><div class="cols" style="align-items:center"><div style="flex:1 1 220px">

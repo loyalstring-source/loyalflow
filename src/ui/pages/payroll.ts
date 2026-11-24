@@ -5,6 +5,7 @@ import type { PayrollRun, Payslip, SalaryStructure, Money, Declaration } from '.
 import { parseMoney, sum, fyOf } from '../../modules/hr/payroll.ts';
 import type { Employee, Department } from '../../modules/people/model.ts';
 import { fmtDate, fmtDateTime, inr } from '../../lib/time.ts';
+import { can } from '../../lib/scope.ts';
 
 const money = (n: number) => `₹${Math.round(n).toLocaleString('en-IN')}`;
 const RUN_LABEL: Record<string, string> = { draft: 'Draft', approved: 'Approved', paid: 'Paid' };
@@ -21,7 +22,7 @@ export function payrollPage(v: View, d: PayrollData): Raw {
   return page(v, { title: 'Payroll', subtitle: 'Monthly salary runs with PF, ESI, professional tax and TDS. Attendance and approved leave decide the payable days.',
     actions: html`${button('Salary structures', { href: '/payroll/salaries', kind: 'ghost', icon: 'people' })}${when(d.canRun, () => button('New run', { modal: '/payroll/new', kind: 'primary', icon: 'plus' }))}`,
     body: html`
-      ${when(!d.verified, () => notice('warn', html`<b>Statutory rates are not confirmed yet.</b> PF, ESI, professional tax and income-tax slabs come with sensible defaults, but your CA must confirm them in <a href="/settings?section=statutory">Settings → Statutory</a> before the first live payroll. Until then every payslip carries a note.`))}
+      ${when(!d.verified, () => notice('warn', html`<b>Statutory rates are not confirmed yet.</b> PF, ESI, professional tax and income-tax slabs come with sensible defaults, but your CA must confirm them in ${!can(v.app.db, v.user, 'settings.admin') ? 'Settings → Statutory (an administrator opens it)' : html`<a href="/settings?section=statutory">Settings → Statutory</a>`} before the first live payroll. Until then every payslip carries a note.`))}
       ${when(d.missingStructures.length, () => notice('accent', html`<b>${d.missingStructures.length} active ${d.missingStructures.length === 1 ? 'employee has' : 'employees have'} no salary structure</b> and will be skipped: ${d.missingStructures.slice(0, 6).map((e) => e.full_name).join(', ')}${when(d.missingStructures.length > 6, '…')}. <a href="/payroll/salaries">Add them</a>.`))}
       <section class="card">${table(['Month', 'Status', 'People', 'Gross', 'Deductions', 'Net pay', 'Employer cost', ''], d.runs.map((r) => [html`<a href="/payroll/${r.id}"><b>${monthName(r.month)}</b></a>`,
         runPill(r.status), r.headcount, money(r.gross), money(r.deductions), html`<b class="num">${money(r.net)}</b>`, money(r.employer_cost),
@@ -48,7 +49,7 @@ export function runPage(v: View, d: RunDetail): Raw {
       ${when(d.canApprove && r.status === 'draft', () => button('Approve', { post: `/payroll/${r.id}/approve`, kind: 'good', icon: 'check', confirm: `Approve payroll for ${monthName(r.month)}? Payslips become visible to all ${r.headcount} employees.` }))}
       ${when(d.canApprove && r.status === 'approved', () => html`${button('Mark paid', { post: `/payroll/${r.id}/paid`, kind: 'primary', confirm: 'Mark this run as paid? It can no longer be changed.' })}${button('Reopen', { post: `/payroll/${r.id}/reopen`, prompt: 'Why is the run being reopened?', promptKey: 'reason' })}`)}`,
     body: html`
-      ${when(!d.verified, () => notice('warn', html`Statutory rates still need the CA's confirmation — see <a href="/settings?section=statutory">Settings → Statutory</a>.`))}
+      ${when(!d.verified, () => notice('warn', html`Statutory rates still need the CA's confirmation — see ${!can(v.app.db, v.user, 'settings.admin') ? 'Settings → Statutory (an administrator can open it)' : html`<a href="/settings?section=statutory">Settings → Statutory</a>`}.`))}
       <div class="grid grid-4">${statCard({ value: money(r.gross), label: 'Gross earnings', tone: 'neutral' })}${statCard({ value: money(r.deductions), label: 'Deductions', tone: 'neutral', sub: 'PF, ESI, PT, TDS' })}${statCard({ value: money(r.net), label: 'Net pay', tone: 'accent', sub: `${r.headcount} people` })}${statCard({ value: money(r.employer_cost), label: 'Total employer cost', tone: 'neutral', sub: 'gross + employer contributions' })}</div>
       <div class="cols"><section class="card col-main"><div class="card-head"><h2>Payslips</h2><span class="small muted">${lop.length ? `${lop.length} with loss of pay` : 'no loss of pay this month'}</span></div>
         ${table(['Employee', 'Days', 'Gross', 'PF', 'ESI', 'PT', 'TDS', 'Net'], d.slips.map((s) => { const ded = parseMoney(s.deductions); return [

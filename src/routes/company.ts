@@ -30,7 +30,8 @@ function allowedScope(app: App, me: Employee, scope: KpiScope): boolean {
   const s = scopeFor(app.db, me);
   if (scope.type === 'company') return s.level === 'company' || can(app.db, me, 'reports.company');
   if (scope.type === 'department') return s.level === 'company' || (s.level === 'team' && scope.id === me.department_id);
-  return s.people.has(scope.id);
+  // HR already sees a person's KPI tiles on their profile, so the detail behind a tile opens for them too.
+  return s.people.has(scope.id) || can(app.db, me, 'people.admin');
 }
 
 export function buildCompany(app: App, me: Employee, now = new Date()): CompanyData {
@@ -81,7 +82,7 @@ export function register(r: Router<Employee>, app: App): void {
     const data: KpiDetailData = {
       def, tile: t, scope, scopeName, series: series(app, def.key, scope, 13, now), fullTarget: targetFor(app, def.key, scope), people,
       canSetTarget: exec, canPropose: !exec && v.user.functional_role === 'hod', canEnter: def.source === 'manual' && (exec || ownerDeptMatch),
-      targetHistory: history, departments: listDepartments(app.db).map((d) => ({ id: d.id, name: d.name, code: d.code })), streak: redStreak(app, def.key, scope, now)
+      targetHistory: history, departments: listDepartments(app.db).filter((d) => allowedScope(app, v.user, { type: 'department', id: d.id })).map((d) => ({ id: d.id, name: d.name, code: d.code })), streak: redStreak(app, def.key, scope, now)
     };
     return htmlResponse(kpiDetailPage(v, data));
   });

@@ -3,8 +3,7 @@ import { login, SUPPORT_LEAD, COO } from './helpers.ts';
 
 test('support lead: sign in, raise a P1, reply, resolve with confetti, see it on the company page', async ({ page }) => {
   await login(page, SUPPORT_LEAD);
-  await expect(page.locator('h1')).toHaveText('Today');
-  await expect(page.getByText(/Good (morning|afternoon|evening), Prasad/)).toBeVisible();
+  await expect(page.locator('h1')).toHaveText(/Good (morning|afternoon|evening), Prasad/);
 
   await page.goto('/desk');
   await expect(page.locator('h1')).toHaveText('Service desk');
@@ -49,6 +48,10 @@ test('support lead: sign in, raise a P1, reply, resolve with confetti, see it on
 
 test('COO: approvals from Today, targets, Excel and PowerPoint downloads', async ({ page }) => {
   await login(page, COO);
+  // The COO lands on the company overview; approvals with an Approve button are on My day.
+  await expect(page.locator('h1')).toHaveText('Company overview');
+  await expect(page.locator('.bf-card').first()).toBeVisible();
+  await page.goto('/my-day');
   const approve = page.locator('section', { hasText: 'Waiting for your approval' }).getByRole('button', { name: 'Approve' }).first();
   await expect(approve).toBeVisible();
   await approve.click();

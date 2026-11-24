@@ -38,11 +38,11 @@ test('employee: see my own payslips and file a tax declaration', async ({ page }
   await expect(page.locator('body')).toContainText(/regime/i);
 });
 
-test('attendance: correct a missed day and have the manager approve it', async ({ page }) => {
+test('attendance: a missed punch is raised as a request with a reason', async ({ page }) => {
   await login(page, SUPPORT_IC);
   await page.goto('/attendance');
   await expect(page.locator('h1')).toHaveText('Attendance');
-  await page.getByRole('button', { name: /Correct a day/i }).click();
+  await page.getByRole('button', { name: /Miss-punch request/i }).click();
   await expect(page.locator('#modal')).toBeVisible();
   await expect(page.locator('#modal')).toContainText(/reason/i);
 });

@@ -159,10 +159,12 @@ export function estimatesListPage(v: View, d: { rows: Estimate[]; total: number;
 }
 
 /** The card on a deal page. */
-export function dealEstimatesCard(d: { dealId: string; estimates: Estimate[]; canEdit: boolean; open: boolean }): Raw {
+export function dealEstimatesCard(d: { dealId: string; estimates: Estimate[]; canEdit: boolean; open: boolean; canOpen?: boolean }): Raw {
+  // Someone who can see the deal but not another person's estimate gets the list without links.
+  const href = (id: string): Raw => (d.canOpen === false ? html`` : html` href="/estimates/${id}"`);
   const draft = d.estimates.find((e) => e.status === 'draft');
   return html`<section class="card" style="padding:14px 16px"><div class="card-head"><h3>Estimates</h3>${when(d.canEdit && d.open, () => draft ? button('Continue the draft', { href: `/estimates/${draft.id}`, size: 'sm', kind: 'primary' }) : button(d.estimates.length ? 'New version' : 'New estimate', { post: `/deals/${d.dealId}/estimate`, size: 'sm', kind: 'primary' }))}</div>
-    ${d.estimates.length ? html`<div class="list">${d.estimates.map((e) => html`<a class="list-row" href="/estimates/${e.id}" style="text-decoration:none;color:inherit"><span style="flex:1"><b>${e.number}${e.version > 1 ? ` v${e.version}` : ''}</b><br><span class="small muted">${fmtDate(e.estimate_date)} · valid until ${fmtDate(e.valid_until)}</span></span><b class="num">${cur(e.currency)}${fmt(e.total)}</b>${statusPill(e)}</a>`)}</div>`
+    ${d.estimates.length ? html`<div class="list">${d.estimates.map((e) => html`<a class="list-row"${href(e.id)} style="text-decoration:none;color:inherit"><span style="flex:1"><b>${e.number}${e.version > 1 ? ` v${e.version}` : ''}</b><br><span class="small muted">${fmtDate(e.estimate_date)} · valid until ${fmtDate(e.valid_until)}</span></span><b class="num">${cur(e.currency)}${fmt(e.total)}</b>${statusPill(e)}</a>`)}</div>`
       : html`<p class="small muted" style="margin-top:6px">No estimate yet. An estimate lists products with pictures, quantity, price and GST, and goes to the customer by a link.</p>`}</section>`;
 }
 

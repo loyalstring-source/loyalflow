@@ -11,6 +11,7 @@ import type { DevIssue } from '../../modules/desk/service.ts';
 import { STATUS_LABEL, typePill } from './dev.ts';
 import type { Tile } from '../../modules/kpi/engine.ts';
 import { fmtDate, fmtTime, money, relativeAge, inr } from '../../lib/time.ts';
+import { can } from '../../lib/scope.ts';
 
 export interface TodayData {
   now: Date;
@@ -165,7 +166,7 @@ export function todayPage(v: View, d: TodayData): Raw {
           ${when(nothingOn, () => section(emptyRich({
             icon: 'sun', title: 'A clear run today',
             body: 'No approvals, no checklist steps, nothing overdue. If something comes in it will appear here.',
-            action: button('Look at the company page', { href: '/company', size: 'sm' })
+            action: can(v.app.db, v.user, 'reports.company') ? button('Look at the company page', { href: '/company', size: 'sm' }) : button('Open the daily review', { href: '/dsr', size: 'sm' })
           })))}
         </div>
         <div class="col-side">${myDay}${apps}${notes}${requests}${leave}</div>

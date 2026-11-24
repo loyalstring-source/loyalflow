@@ -431,7 +431,7 @@ export function panelConflicts(app: App, panel: string[], startsAt: string, ends
   return out;
 }
 
-export function scheduleInterview(app: App, actor: Employee, input: { applicationId: string; roundType: string; mode?: string; location?: string; startsAt: string; minutes: number; panel: string[]; force?: boolean }): Interview {
+export function scheduleInterview(app: App, actor: Employee, input: { applicationId: string; roundType: string; roundName?: string; mode?: string; location?: string; startsAt: string; minutes: number; panel: string[]; force?: boolean }): Interview {
   const a = getApplication(app, input.applicationId);
   if (!a) throw new HttpError(404, 'Application not found.');
   requireSeeApplication(app, actor, a);

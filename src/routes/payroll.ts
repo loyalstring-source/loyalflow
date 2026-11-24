@@ -74,7 +74,7 @@ export function register(r: Router<Employee>, app: App): void {
     const slip = getPayslip(app, ctx.params.id); if (!slip) throw new HttpError(404, 'Payslip not found');
     const self = slip.employee_id === v.user.id;
     if (!self && !canRunPayroll(app, v.user)) throw new HttpError(403, 'Payslips are private to the employee, HR and Accounts.');
-    if (self && slip.run_status === 'draft') throw new HttpError(403, 'This payslip is not published yet.');
+    if (self && slip.run_status === 'draft' && !canRunPayroll(app, v.user)) throw new HttpError(403, 'This payslip is not published yet.');
     const e = getEmployee(app.db, slip.employee_id)!;
     const company = getSetting(app.db, 'company').name;
     if (ctx.query.get('print') === '1') return htmlResponse(payslipPrint({ slip, employee: e, company }));
