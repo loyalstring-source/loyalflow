@@ -4,13 +4,15 @@ import { page, type View } from '../layout.ts';
 import { field, input, textarea, select, notice, pill, table, button, empty, statCard } from '../components.ts';
 import * as lists from '../../lib/lists.ts';
 import { fmtDate, fmtDateTime } from '../../lib/time.ts';
-import { STATUS_LABEL, shownStatus, computeTotals, type Product, type Estimate, type EstimateItem, type EstimateSettings } from '../../modules/sales/estimates.ts';
+import { STATUS_LABEL, shownStatus, computeTotals, amountInWords, GST_STATES, stateCodeOf, homeState, type Product, type Estimate, type EstimateItem, type EstimateSettings } from '../../modules/sales/estimates.ts';
 
 const fmt = (n: number): string => (Number(n) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** A date with its year, for a document that will be read months later. */
 const docDate = (d: string | null): string => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : ''; };
 const cur = (c: string): string => (c === 'INR' ? '₹' : c + ' ');
+/** 07/07/2026, the way the company's estimates show dates. */
+const numDate = (d: string): string => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ''); return m ? `${m[3]}/${m[2]}/${m[1]}` : d || ''; };
 const tone = (s: string): 'ink' | 'accent' | 'good' | 'crit' | 'warn' => (s === 'accepted' ? 'good' : s === 'declined' ? 'crit' : s === 'expired' ? 'warn' : s === 'sent' || s === 'final' ? 'accent' : 'ink');
 export const statusPill = (e: Estimate): Raw => { const s = shownStatus(e); return pill(STATUS_LABEL[s] || s, tone(s)); };
 const salesTabs = (active: string): Raw => html`<div class="tabs"><a href="/pipeline">Pipeline</a><a href="/estimates" class="${active === 'estimates' ? 'active' : ''}">Estimates</a><a href="/products" class="${active === 'products' ? 'active' : ''}">Products</a></div>`;
@@ -35,7 +37,9 @@ export function productsPage(v: View, d: { products: Product[]; canManage: boole
         ${field('Address', textarea('address', { value: d.settings.address, rows: 2 }))}
         <div class="grid grid-3">${field('Phone', input('phone', { value: d.settings.phone }))}${field('Email', input('email', { value: d.settings.email }))}${field('Valid for (days)', input('validityDays', { type: 'number', value: d.settings.validityDays, min: 1, max: 180 }))}</div>
         ${field('Terms and conditions', textarea('terms', { value: d.settings.terms, rows: 4 }), 'Copied onto each new estimate, where it can be changed.')}
-        ${field('Bank details (optional)', textarea('bank', { value: d.settings.bank, rows: 2 }))}
+        <div class="grid grid-2">${field('Website', input('website', { value: d.settings.website }))}${field('Note printed on every estimate', input('notes', { value: d.settings.notes }))}</div>
+        ${field('Bank details', textarea('bank', { value: d.settings.bank, rows: 4 }))}
+        <input type="hidden" name="logo" value="off"><label class="row" style="gap:8px"><input type="checkbox" name="logo" value="on" ${when(d.settings.logo, 'checked')}> Print the Loyal String logo at the top</label>
         <div class="row" style="justify-content:flex-end"><button class="btn btn-primary" type="submit">Save</button></div></form>`)}`
   });
 }
@@ -75,45 +79,68 @@ export function productFormPage(v: View, p: Product | null): Raw {
 // ---------- The estimate as the customer sees it ----------
 
 export function estimateDocument(e: Estimate, items: EstimateItem[], s: EstimateSettings, imgBase: string): Raw {
-  const t = computeTotals(items); const sym = cur(e.currency); const anyDiscount = items.some((i) => i.discount_pct > 0);
+  const t = computeTotals(items); const sym = cur(e.currency); const anyDiscount = items.some((i) => i.discount_pct > 0); const inter = e.tax_mode === 'inter';
+  const half = (x: number): number => Math.round(x * 50) / 100; const grossOf = (i: EstimateItem): number => Math.round(i.qty * i.rate * 100) / 100;
+  const contact = [s.website, s.phone ? 'Phone: ' + s.phone : ''].filter(Boolean).join(', ');
+  const taxCols = inter ? 2 : 4; const lead = 5 + (anyDiscount ? 1 : 0);
   return html`<div class="est-doc">
-    <div class="est-head"><div><div class="est-seller">${s.sellerName}</div>${when(s.address, () => html`<div class="est-small" style="white-space:pre-line">${s.address}</div>`)}
-        <div class="est-small">${[s.gstin ? 'GSTIN ' + s.gstin : '', s.phone, s.email].filter(Boolean).join(' · ')}</div></div>
-      <div style="text-align:right"><div class="est-title">Estimate</div><div class="est-small"><b>${e.number}${e.version > 1 ? ` · version ${e.version}` : ''}</b></div>
-        <div class="est-small">Date: ${docDate(e.estimate_date)}</div><div class="est-small">Valid until: ${docDate(e.valid_until)}</div></div></div>
-    <div class="est-bill"><div class="est-label">Estimate for</div><div><b>${e.bill_name}</b></div>${when(e.bill_address, () => html`<div class="est-small" style="white-space:pre-line">${e.bill_address}</div>`)}
-      ${when(e.bill_gstin, () => html`<div class="est-small">GSTIN ${e.bill_gstin}</div>`)}${when(e.bill_contact, () => html`<div class="est-small">${e.bill_contact}</div>`)}</div>
-    ${when(e.subject, () => html`<div class="est-subject">${e.subject}</div>`)}
-    <div class="est-scroll"><table class="est-table"><thead><tr><th style="width:26px">#</th><th>Item</th><th class="r">Qty</th><th class="r">Rate</th>${when(anyDiscount, () => html`<th class="r">Disc.</th>`)}<th class="r">Taxable</th><th class="r">GST</th><th class="r">Amount</th></tr></thead>
-      <tbody>${items.map((i, n) => html`<tr><td>${n + 1}</td>
-        <td><div class="est-item">${when(i.image_path, () => html`<img src="${imgBase}/${i.id}" alt="">`)}<div><b>${i.name}</b>${when(i.description, () => html`<div class="est-small" style="white-space:pre-line">${i.description}</div>`)}${when(i.hsn, () => html`<div class="est-small">HSN / SAC ${i.hsn}</div>`)}</div></div></td>
-        <td class="r">${i.qty} ${i.unit}</td><td class="r">${fmt(i.rate)}</td>${when(anyDiscount, () => html`<td class="r">${i.discount_pct ? i.discount_pct + '%' : '—'}</td>`)}
-        <td class="r">${fmt(i.taxable)}</td><td class="r">${fmt(i.tax)}<div class="est-small">${i.gst_rate}%</div></td><td class="r"><b>${fmt(i.amount)}</b></td></tr>`)}</tbody></table></div>
-    <div class="est-foot"><div class="est-terms">${when(e.notes, () => html`<div class="est-label">Notes</div><div class="est-small" style="white-space:pre-line;margin-bottom:10px">${e.notes}</div>`)}
-        ${when(e.terms, () => html`<div class="est-label">Terms and conditions</div><div class="est-small" style="white-space:pre-line">${e.terms}</div>`)}
-        ${when(s.bank, () => html`<div class="est-label" style="margin-top:10px">Bank details</div><div class="est-small" style="white-space:pre-line">${s.bank}</div>`)}</div>
-      <table class="est-totals"><tbody>
-        ${when(t.discount > 0, () => html`<tr><td>Amount before discount</td><td class="r">${fmt(t.gross)}</td></tr><tr><td>Discount</td><td class="r">− ${fmt(t.discount)}</td></tr>`)}
-        <tr><td>Taxable value</td><td class="r">${fmt(t.taxable)}</td></tr>
-        ${t.byRate.filter((b) => b.tax > 0).map((b) => e.tax_mode === 'inter' ? html`<tr><td>IGST ${b.rate}%</td><td class="r">${fmt(b.tax)}</td></tr>`
-          : html`<tr><td>CGST ${b.rate / 2}%</td><td class="r">${fmt(Math.round(b.tax * 50) / 100)}</td></tr><tr><td>SGST ${b.rate / 2}%</td><td class="r">${fmt(b.tax - Math.round(b.tax * 50) / 100)}</td></tr>`)}
-        <tr class="est-grand"><td>Total (${e.currency})</td><td class="r">${sym}${fmt(t.total)}</td></tr></tbody></table></div>
-    ${when(s.footer, () => html`<div class="est-small" style="margin-top:18px;text-align:center">${s.footer}</div>`)}
+    ${when(e.status === 'draft', () => html`<div class="est-mark" aria-hidden="true">Draft</div>`)}
+    <div class="est-head">${when(s.logo, () => html`<img class="est-logo" src="/static/loyalstring-logo.jpg" alt="${s.sellerName}">`)}
+      <div class="est-co"><div class="est-seller">${s.sellerName}</div>${when(s.address, () => html`<div style="white-space:pre-line">${s.address}</div>`)}
+        ${when(s.email, () => html`<div>Email: ${s.email}</div>`)}${when(contact, () => html`<div>${contact}</div>`)}${when(s.gstin, () => html`<div>GSTIN ${s.gstin}</div>`)}</div>
+      <div class="est-title">Estimate</div></div>
+    <div class="est-meta"><table><tbody><tr><td>Estimate#</td><td><b>: ${e.number}${e.version > 1 ? ` (version ${e.version})` : ''}</b></td></tr><tr><td>Estimate Date</td><td><b>: ${numDate(e.estimate_date)}</b></td></tr><tr><td>Valid Until</td><td><b>: ${numDate(e.valid_until)}</b></td></tr></tbody></table>
+      <table><tbody><tr><td>Place Of Supply</td><td><b>: ${e.place_of_supply || '—'}</b></td></tr><tr><td>Sales person</td><td><b>: ${e.owner_name || 'Sales Team'}</b></td></tr></tbody></table></div>
+    <div class="est-band">Bill To</div>
+    <div class="est-bill"><b>${e.bill_name}</b>${when(e.bill_address, () => html`<div style="white-space:pre-line">${e.bill_address}</div>`)}
+      ${when(e.bill_gstin, () => html`<div>GSTIN ${e.bill_gstin}</div>`)}${when(e.bill_contact, () => html`<div>${e.bill_contact}</div>`)}${when(e.subject, () => html`<div class="est-subject">Subject: ${e.subject}</div>`)}</div>
+    <div class="est-scroll"><table class="est-table"><thead>
+      <tr><th rowspan="2" style="width:24px">#</th><th rowspan="2" class="l">Item &amp; Description</th><th rowspan="2" class="l">HSN/SAC</th><th rowspan="2">Qty</th><th rowspan="2">Rate</th>${when(anyDiscount, () => html`<th rowspan="2">Disc.</th>`)}<th rowspan="2">Amount</th><th rowspan="2">Taxable<br>Amount</th>
+        ${inter ? html`<th colspan="2" class="c">IGST</th>` : html`<th colspan="2" class="c">CGST</th><th colspan="2" class="c">SGST</th>`}</tr>
+      <tr>${inter ? html`<th>%</th><th>Amt</th>` : html`<th>%</th><th>Amt</th><th>%</th><th>Amt</th>`}</tr></thead>
+      <tbody>${items.map((i, n) => html`<tr><td class="c">${n + 1}</td>
+        <td><div class="est-item">${when(i.image_path, () => html`<img src="${imgBase}/${i.id}" alt="">`)}<div><span class="est-name">${i.name}</span>${when(i.description, () => html`<div class="est-desc">${i.description}</div>`)}</div></div></td>
+        <td>${i.hsn}</td><td class="r">${fmt(i.qty)}<br><span class="est-desc">${i.unit}</span></td><td class="r">${fmt(i.rate)}</td>${when(anyDiscount, () => html`<td class="r">${i.discount_pct ? i.discount_pct + '%' : ''}</td>`)}
+        <td class="r">${fmt(grossOf(i))}</td><td class="r">${fmt(i.taxable)}</td>
+        ${inter ? html`<td class="r">${i.gst_rate}%</td><td class="r">${fmt(i.tax)}</td>` : html`<td class="r">${i.gst_rate / 2}%</td><td class="r">${fmt(half(i.tax))}</td><td class="r">${i.gst_rate / 2}%</td><td class="r">${fmt(i.tax - half(i.tax))}</td>`}</tr>`)}
+        <tr class="est-sub"><td colspan="${lead}" class="r"><b>Sub Total</b></td><td class="r">${fmt(t.gross)}</td><td class="r">${sym}${fmt(t.taxable)}</td>
+          ${inter ? html`<td colspan="2" class="r">${fmt(t.tax)}</td>` : html`<td colspan="2" class="r">${fmt(half(t.tax))}</td><td colspan="2" class="r">${fmt(t.tax - half(t.tax))}</td>`}</tr></tbody></table></div>
+    <div class="est-foot"><div class="est-left">
+        <div class="est-lab">Total In Words</div><div class="est-words">${amountInWords(t.total, e.currency)}</div>
+        ${when(e.notes, () => html`<div class="est-lab">Notes</div><div style="white-space:pre-line">${e.notes}</div>`)}
+        ${when(s.bank, () => html`<div class="est-lab">Company Bank Details:</div><div style="white-space:pre-line">${s.bank}</div>`)}
+        ${when(e.terms, () => html`<div class="est-lab">Terms &amp; Conditions</div><div style="white-space:pre-line">${e.terms}</div>`)}</div>
+      <div class="est-right"><div class="est-total"><b>Total</b><b>${sym}${fmt(t.total)}</b></div>${when(t.discount > 0, () => html`<div class="est-saved">Includes a discount of ${sym}${fmt(t.discount)}</div>`)}<div class="est-sign">Authorized Signature</div></div></div>
+    ${when(s.footer, () => html`<div class="est-footer">${s.footer}</div>`)}
   </div>`;
 }
 export const ESTIMATE_CSS = raw(`<style>
-.est-doc{background:#fff;color:#111;border:1px solid #e3e1da;border-radius:10px;padding:32px 36px;max-width:960px;font-size:13.5px;line-height:1.5}
-.est-head{display:flex;justify-content:space-between;gap:24px;border-bottom:2px solid #111;padding-bottom:16px}
-.est-seller{font-size:20px;font-weight:600}.est-title{font-size:22px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
-.est-small{font-size:12px;color:#555}.est-label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#777;margin-bottom:3px}
-.est-bill{margin:18px 0 6px}.est-subject{margin:12px 0 4px;font-weight:600}
-.est-table{width:100%;border-collapse:collapse;margin-top:14px}.est-table th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#555;text-align:left;border-bottom:1px solid #111;padding:8px 6px}
-.est-table td{padding:10px 6px;border-bottom:1px solid #e3e1da;vertical-align:top}.est-table .r,.est-totals .r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
-.est-item{display:flex;gap:12px;align-items:flex-start}.est-item img{width:64px;height:64px;object-fit:contain;border:1px solid #e3e1da;border-radius:6px;background:#fff;flex:none}
-.est-scroll{overflow-x:auto}.est-foot{display:flex;justify-content:space-between;gap:32px;margin-top:18px;align-items:flex-start}.est-terms{flex:1;min-width:0}
-.est-totals{border-collapse:collapse;min-width:290px;width:auto!important;flex:none}.est-doc table{margin:0}.est-totals td{padding:5px 6px}.est-grand td{border-top:2px solid #111;font-weight:700;font-size:15px;padding-top:9px}
-@media (max-width:700px){.est-doc{padding:18px 14px}.est-head,.est-foot{flex-direction:column}.est-head>div:last-child{text-align:left!important}.est-totals{width:100%;min-width:0}.est-item img{width:44px;height:44px}.est-table{min-width:620px}}
-@media print{body{background:#fff!important}.no-print,.sidebar,.topbar,.mobile-nav,#toast-root,header,nav,.notice,.alert,.banner{display:none!important}.est-doc{border:0;padding:0;max-width:none}main,.main,.content{margin:0!important;padding:0!important}tr{break-inside:avoid}}
+.est-doc{position:relative;background:#fff;color:#111;border:1px solid #9a9a9a;max-width:960px;font-size:12.5px;line-height:1.4;overflow:hidden}
+.est-doc table{margin:0;border-collapse:collapse}
+.est-mark{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:120px;font-weight:700;color:rgba(0,0,0,.06);transform:rotate(-35deg);pointer-events:none;letter-spacing:.05em}
+.est-head{display:flex;align-items:flex-end;gap:20px;padding:14px 16px 6px;border-bottom:1px solid #9a9a9a}
+.est-logo{width:170px;height:auto;flex:none;align-self:center}
+.est-co{flex:1;min-width:0}.est-seller{font-size:17px;font-weight:700;margin-bottom:3px}
+.est-title{font-size:30px;font-weight:500;line-height:1;white-space:nowrap;padding-bottom:2px}
+.est-meta{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #9a9a9a}.est-meta>table{width:100%}.est-meta>table+table{border-left:1px solid #9a9a9a}
+.est-meta td{padding:1px 8px;border:0;vertical-align:top}.est-meta td:first-child{width:46%;color:#333}.est-meta table{margin:4px 0}
+.est-band{background:#f1f1f1;font-weight:700;padding:3px 12px;border-bottom:1px solid #9a9a9a}
+.est-bill{padding:8px 12px 12px;font-size:13px}.est-bill b{font-size:14px}.est-subject{margin-top:4px;color:#333}
+.est-scroll{overflow-x:auto}
+.est-table{width:100%}.est-table th{background:#f1f1f1;font-weight:700;text-align:right;padding:4px 6px;border:1px solid #9a9a9a;vertical-align:bottom;white-space:nowrap}
+.est-table th.l{text-align:left}.est-table th.c,.est-table td.c{text-align:center}
+.est-table td{padding:5px 6px;border:1px solid #9a9a9a;vertical-align:top}.est-table tr>*:first-child{border-left:0}.est-table tr>*:last-child{border-right:0}
+.est-table .r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.est-name{text-transform:none}.est-desc{color:#444;white-space:pre-line}
+.est-item{display:flex;gap:10px;align-items:flex-start}.est-item img{width:52px;height:52px;object-fit:contain;border:1px solid #d5d5d5;background:#fff;flex:none}
+.est-sub td{font-variant-numeric:tabular-nums}
+.est-foot{display:grid;grid-template-columns:56% 44%}.est-left{padding:10px 12px 18px}.est-right{border-left:1px solid #9a9a9a;display:flex;flex-direction:column}
+.est-lab{color:#333;margin-top:12px}.est-left .est-lab:first-child{margin-top:4px}.est-words{font-weight:700;font-style:italic}
+.est-total{display:flex;justify-content:space-between;gap:12px;padding:5px 8px;border-bottom:1px solid #9a9a9a;font-size:13px}
+.est-saved{padding:4px 8px;color:#444}.est-sign{margin-top:auto;min-height:96px;display:flex;align-items:flex-end;justify-content:center;padding:6px;border-bottom:1px solid #9a9a9a}
+.est-footer{border-top:1px solid #9a9a9a;padding:6px 12px;text-align:center;color:#444}
+@media (max-width:700px){.est-head{flex-wrap:wrap}.est-logo{width:120px}.est-meta,.est-foot{grid-template-columns:1fr}.est-meta>table+table,.est-right{border-left:0;border-top:1px solid #9a9a9a}.est-table{min-width:680px}.est-mark{font-size:70px}}
+@media print{@page{size:A4;margin:12mm}body{background:#fff!important}.no-print,.sidebar,.topbar,.shellbar,.mobile-nav,#toast-root,header,nav,.notice,.alert,.banner,.page-head{display:none!important}.est-doc{max-width:none;font-size:11.5px}main,.main,.content{margin:0!important;padding:0!important}tr{break-inside:avoid}.est-band,.est-table th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 </style>`);
 
 /** The page a customer opens from the link. No sign-in, no menu. */
@@ -173,7 +200,7 @@ export function estimatePage(v: View, d: EstimateViewData): Raw {
   const head = html`<div class="row no-print" style="gap:8px;flex-wrap:wrap;margin-bottom:4px">${statusPill(e)}<a class="small" href="/deals/${e.deal_id}">Deal: ${e.customer_name}${e.deal_title ? ' · ' + e.deal_title : ''}</a>
     ${when(d.versions.length > 1, () => html`<span class="small muted">Versions: ${d.versions.map((x) => x.id === e.id ? html`<b>v${x.version}</b> ` : html`<a href="/estimates/${x.id}">v${x.version}</a> `)}</span>`)}</div>`;
   if (draft && d.canEdit) {
-    const cfg = { id: e.id, products: d.products.map((p) => ({ id: p.id, name: p.name, description: p.description, unit: p.unit, price: p.price, hsn: p.hsn, gst: p.gst_rate, img: p.image_path ? `/products/${p.id}/image?v=${encodeURIComponent(p.image_path)}` : '' })),
+    const cfg = { id: e.id, homeState: homeState(d.settings), products: d.products.map((p) => ({ id: p.id, name: p.name, description: p.description, unit: p.unit, price: p.price, hsn: p.hsn, gst: p.gst_rate, img: p.image_path ? `/products/${p.id}/image?v=${encodeURIComponent(p.image_path)}` : '' })),
       items: d.items.map((i) => ({ productId: i.product_id || '', name: i.name, description: i.description, hsn: i.hsn, unit: i.unit, qty: i.qty, rate: i.rate, discountPct: i.discount_pct, gstRate: i.gst_rate })), units: lists.items('sales.units').map((u) => u.value), gst: lists.items('sales.gstRates').map((g) => Number(g.value)).filter((n) => Number.isFinite(n)), inter: e.tax_mode === 'inter' };
     return page(v, {
       title: `${e.number}${e.version > 1 ? ' v' + e.version : ''} · draft`, docTitle: e.number, subtitle: 'Add the products, check the figures, then finalise. Nothing goes to the customer until you send it.',
@@ -183,8 +210,8 @@ export function estimatePage(v: View, d: EstimateViewData): Raw {
         <form class="card form" id="est-form" onsubmit="return false">
           <div class="grid grid-3">${field('Estimate for', input('billName', { value: e.bill_name, required: true }))}${field('Customer GSTIN (optional)', input('billGstin', { value: e.bill_gstin, placeholder: '15 characters' }))}${field('Contact', input('billContact', { value: e.bill_contact }))}</div>
           ${field('Customer address', textarea('billAddress', { value: e.bill_address, rows: 2 }))}
-          <div class="grid grid-4">${field('Estimate date', input('estimateDate', { type: 'date', value: e.estimate_date }))}${field('Valid until', input('validUntil', { type: 'date', value: e.valid_until }))}
-            ${field('GST type', select('taxMode', [{ value: 'intra', label: 'Same state: CGST + SGST', selected: e.tax_mode !== 'inter' }, { value: 'inter', label: 'Other state: IGST', selected: e.tax_mode === 'inter' }]))}${field('Subject (optional)', input('subject', { value: e.subject }))}</div>
+          <div class="grid grid-3">${field('Estimate date', input('estimateDate', { type: 'date', value: e.estimate_date }))}${field('Valid until', input('validUntil', { type: 'date', value: e.valid_until }))}
+            ${field('Place of supply', select('placeOfSupply', GST_STATES.map(([c, n]) => ({ value: c, label: `${n} (${c})`, selected: (stateCodeOf(e.place_of_supply) || homeState(d.settings)) === c }))), 'Decides the GST type')}${field('GST type', select('taxMode', [{ value: 'intra', label: 'Same state: CGST + SGST', selected: e.tax_mode !== 'inter' }, { value: 'inter', label: 'Other state: IGST', selected: e.tax_mode === 'inter' }]))}${field('Subject (optional)', input('subject', { value: e.subject }))}</div>
           <h3 style="margin-top:8px">Lines</h3>
           <div class="table-wrap"><table id="est-lines" style="min-width:980px"><thead><tr><th style="width:56px"></th><th style="min-width:230px">Product</th><th style="width:90px">Qty</th><th style="width:100px">Unit</th><th style="width:120px">Rate (₹)</th><th style="width:84px">Disc. %</th><th style="width:92px">GST %</th><th style="width:110px;text-align:right">GST (₹)</th><th style="width:130px;text-align:right">Amount (₹)</th><th style="width:40px"></th></tr></thead><tbody></tbody></table></div>
           <div class="row between" style="margin-top:10px;align-items:flex-start;gap:24px;flex-wrap:wrap"><button class="btn btn-sm" type="button" id="est-add">Add a line</button>
@@ -271,9 +298,10 @@ const BUILDER_JS = `<script>
   body.addEventListener('input', recalc);
   body.addEventListener('click', function (ev) { if (ev.target.classList.contains('js-del')) { ev.target.closest('tr').remove(); if (!body.children.length) addRow(); recalc(); } });
   form.elements.taxMode.addEventListener('change', recalc);
+  form.elements.placeOfSupply.addEventListener('change', function () { form.elements.taxMode.value = form.elements.placeOfSupply.value === cfg.homeState ? 'intra' : 'inter'; recalc(); });
   document.getElementById('est-add').addEventListener('click', function () { var tr = addRow(); recalc(); tr.querySelector('.js-product').focus(); });
   function collect() {
-    var b = {}; ['billName', 'billGstin', 'billContact', 'billAddress', 'estimateDate', 'validUntil', 'taxMode', 'subject', 'notes', 'terms'].forEach(function (k) { b[k] = form.elements[k].value; });
+    var b = {}; ['billName', 'billGstin', 'billContact', 'billAddress', 'estimateDate', 'validUntil', 'placeOfSupply', 'taxMode', 'subject', 'notes', 'terms'].forEach(function (k) { b[k] = form.elements[k].value; });
     b.items = Array.prototype.map.call(body.children, function (tr) { return { productId: tr.querySelector('.js-product').value, name: tr.querySelector('.js-name').value, description: tr.querySelector('.js-desc').value, hsn: tr.getAttribute('data-hsn') || '', unit: tr.querySelector('.js-unit').value, qty: tr.querySelector('.js-qty').value, rate: tr.querySelector('.js-rate').value, discountPct: tr.querySelector('.js-disc').value, gstRate: tr.querySelector('.js-gst').value }; }).filter(function (i) { return i.name.trim() || i.productId; });
     return b;
   }

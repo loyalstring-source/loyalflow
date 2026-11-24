@@ -227,6 +227,11 @@ export function buildBrief(app: App, viewer: Employee, now = new Date()): Brief 
       const t = one(app, `SELECT COUNT(*) AS n, SUM(CASE WHEN ${st} = 'done' THEN 1 ELSE 0 END) AS ok, COALESCE(SUM(amount_expected), 0) AS exp, COALESCE(SUM(COALESCE(amount_actual, self_amount, 0)), 0) AS got FROM dsr_items WHERE department_id = ? AND day = ?`, [d.id, day]);
       const w = one(app, `SELECT COUNT(*) AS n, SUM(CASE WHEN ${st} = 'done' THEN 1 ELSE 0 END) AS ok FROM dsr_items WHERE department_id = ? AND day BETWEEN ? AND ?`, [d.id, weekFrom, weekTo]);
       const money = styles[d.id] === 'collections';
+      if (styles[d.id] === 'hourly') {
+        const h = one(app, "SELECT COALESCE(SUM(planned_hours), 0) AS hrs, COUNT(DISTINCT employee_id) AS ppl FROM dsr_items WHERE department_id = ? AND day = ? AND slot_from <> ''", [d.id, day]);
+        const heads = count(app, "SELECT COUNT(*) AS n FROM employees WHERE department_id = ? AND status = 'active'", [d.id]);
+        dsrToday = { done: h.ppl || 0, total: heads, text: h.ppl ? `${Math.round((h.hrs || 0) * 10) / 10} h logged by ${h.ppl} of ${heads}` : 'Nothing logged yet today' };
+      } else
       dsrToday = !t.n ? { done: 0, total: 0, text: 'Nothing planned today' } : money ? { done: t.got || 0, total: t.exp || 0, text: `${fmt('inr', t.got)} of ${fmt('inr', t.exp)} in` } : { done: t.ok || 0, total: t.n, text: `${t.ok || 0} of ${t.n} done` };
       dsrWeek = { done: w.ok || 0, total: w.n || 0 };
     }
@@ -257,6 +262,12 @@ export function buildBrief(app: App, viewer: Employee, now = new Date()): Brief 
   }
   const stuck = app.db.all<{ department_id: string; n: number }>('SELECT department_id, COUNT(*) AS n FROM dsr_items WHERE day = ? AND carry_count >= 3 GROUP BY department_id', [day]).filter((x) => seeIds.has(x.department_id));
   for (const x of stuck) attention.push({ tone: 'warn', tag: 'Carried', title: `${x.n} line${x.n === 1 ? '' : 's'} on today's daily review ${x.n === 1 ? 'has' : 'have'} been brought forward 3 times or more`, sub: 'Open the daily review to see which', team: deptById.get(x.department_id)!.name, href: `/dsr?team=${x.department_id}` });
+  // Teams that keep an hour-by-hour log: after midday on a working day, name how many people have logged nothing.
+  if (toLocal(now).hh >= 12 && workingDays(app, day, day)) for (const d of sees) {
+    if (styles[d.id] !== 'hourly') continue;
+    const quietOnes = app.db.all<{ full_name: string }>("SELECT e.full_name FROM employees e WHERE e.department_id = ? AND e.status = 'active' AND NOT EXISTS (SELECT 1 FROM dsr_items i WHERE i.employee_id = e.id AND i.day = ?) AND NOT EXISTS (SELECT 1 FROM leave_requests l WHERE l.employee_id = e.id AND l.status = 'approved' AND ? BETWEEN l.from_date AND l.to_date)", [d.id, day, day]);
+    if (quietOnes.length) attention.push({ tone: 'warn', tag: 'No log', title: `${quietOnes.length} ${quietOnes.length === 1 ? 'person has' : 'people have'} not logged any work today`, sub: quietOnes.slice(0, 4).map((x) => x.full_name).join(', ') + (quietOnes.length > 4 ? ' and others' : ''), team: d.name, href: `/dsr?team=${d.id}` });
+  }
   attention.sort((a, b) => Number(b.tone === 'crit') - Number(a.tone === 'crit'));
   const flagged = new Set(attention.map((a) => a.team)); const quiet = sees.filter((d) => !flagged.has(d.name)).length;
 

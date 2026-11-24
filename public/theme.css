@@ -289,6 +289,7 @@ button.path-step.done:not(:disabled):hover{background:var(--good-ink);color:#FFF
 .dsr-edit{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .dsr-in{min-height:30px;padding:2px 8px;font-size:12px;width:auto}
 .dsr-pct{width:58px}.dsr-num{width:118px;flex:0 0 118px}.dsr-note{flex:1 1 130px;min-width:110px}
+.dsr-slot{font-weight:600;color:var(--deep)}.dsr-time{flex:0 0 112px!important;width:112px}
 .dsr-saved{font-size:11px;color:var(--good);min-width:34px}
 .dsr-add{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px dashed var(--line2)}
 .dsr-add .input{flex:1 1 200px;min-height:32px}.dsr-add .dsr-num{flex:0 0 118px}.dsr-add .dsr-ref{flex:1 1 220px}

@@ -20,15 +20,44 @@ const nowIso = (): string => new Date().toISOString();
 
 // ---------- Settings: what is printed on every estimate ----------
 
-export interface EstimateSettings { sellerName: string; address: string; gstin: string; phone: string; email: string; validityDays: number; terms: string; bank: string; footer: string }
+export interface EstimateSettings { sellerName: string; address: string; gstin: string; phone: string; email: string; website: string; validityDays: number; terms: string; notes: string; bank: string; footer: string; logo: boolean }
+/** What Loyal String prints on its estimates today (taken from estimate EST-004544). Sales managers change it under Sales → Products. */
 export const DEFAULT_ESTIMATE_SETTINGS: EstimateSettings = {
-  sellerName: 'Loyal String', address: '', gstin: '', phone: '', email: '', validityDays: 15,
-  terms: 'Prices are in Indian rupees. GST is charged as shown.\nDelivery, installation and training are as agreed in writing.\nThis estimate is valid until the date shown above.', bank: '', footer: ''
+  sellerName: 'Loyal String International Pvt. Ltd.', address: 'Plot No. 77, Sector No. 7, PCNTDA MIDC Bhosari\nPune Maharashtra 411026 India', gstin: '27AAECL0344H1ZQ', phone: '+91 9730767371', email: 'ceo@loyalstring.com', website: 'www.loyalstring.com', validityDays: 15,
+  terms: 'Payment: 100% Advance\nWarranty: 1 Year from the date of purchase\n\nElectric Short Circuit, Force Physical damage and Water damage will not be covered in warranty. For safety customer can use voltage Stabilizer for long life of the machine.\n\nDelivery: At actual\nInstallation: At actual',
+  notes: 'Looking forward for your business.', bank: 'Name : Loyal String International Pvt. Ltd.\nA/C No. : 032105019126\nIFSC Code : ICIC0000321\nBank : ICICI Bank Ltd., Chinchwad, Pune (India)', footer: '', logo: true
 };
+/** Indian states and union territories with their GST codes, for "Place of supply". */
+export const GST_STATES: [string, string][] = [['01', 'Jammu and Kashmir'], ['02', 'Himachal Pradesh'], ['03', 'Punjab'], ['04', 'Chandigarh'], ['05', 'Uttarakhand'], ['06', 'Haryana'], ['07', 'Delhi'], ['08', 'Rajasthan'], ['09', 'Uttar Pradesh'], ['10', 'Bihar'], ['11', 'Sikkim'], ['12', 'Arunachal Pradesh'], ['13', 'Nagaland'], ['14', 'Manipur'], ['15', 'Mizoram'], ['16', 'Tripura'], ['17', 'Meghalaya'], ['18', 'Assam'], ['19', 'West Bengal'], ['20', 'Jharkhand'], ['21', 'Odisha'], ['22', 'Chhattisgarh'], ['23', 'Madhya Pradesh'], ['24', 'Gujarat'], ['26', 'Dadra and Nagar Haveli and Daman and Diu'], ['27', 'Maharashtra'], ['29', 'Karnataka'], ['30', 'Goa'], ['31', 'Lakshadweep'], ['32', 'Kerala'], ['33', 'Tamil Nadu'], ['34', 'Puducherry'], ['35', 'Andaman and Nicobar Islands'], ['36', 'Telangana'], ['37', 'Andhra Pradesh'], ['38', 'Ladakh'], ['97', 'Other Territory']];
+export const stateLabel = (code: string): string => { const st = GST_STATES.find(([c]) => c === code); return st ? `${st[1]} (${st[0]})` : ''; };
+export const stateCodeOf = (label: string): string => /\((\d{2})\)$/.exec(label)?.[1] || '';
+/** The seller's own state, read from the first two digits of the GSTIN. */
+export const homeState = (s: EstimateSettings): string => (/^\d{2}/.test(s.gstin) ? s.gstin.slice(0, 2) : '27');
+/** An amount in words the Indian way: "Indian Rupee Three Lakh Thirty Thousand One Hundred Five Only". */
+export function amountInWords(amount: number, currency = 'INR'): string {
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+  const two = (n: number): string => (n < 20 ? ones[n] : `${tens[Math.floor(n / 10)]}${n % 10 ? ' ' + ones[n % 10] : ''}`);
+  const three = (n: number): string => [n >= 100 ? `${ones[Math.floor(n / 100)]} Hundred` : '', n % 100 ? two(n % 100) : ''].filter(Boolean).join(' ');
+  const whole = (n: number): string => {
+    if (n === 0) return 'Zero'; const parts: string[] = [];
+    const crore = Math.floor(n / 1e7); if (crore) parts.push(`${whole(crore)} Crore`); n %= 1e7;
+    const lakh = Math.floor(n / 1e5); if (lakh) parts.push(`${two(lakh)} Lakh`); n %= 1e5;
+    const thousand = Math.floor(n / 1000); if (thousand) parts.push(`${two(thousand)} Thousand`); n %= 1000;
+    if (n) parts.push(three(n)); return parts.join(' ');
+  };
+  const paise = Math.round(Math.abs(amount) * 100); const r = Math.floor(paise / 100); const p = paise % 100;
+  return `${currency === 'INR' ? 'Indian Rupee' : currency} ${whole(r)}${p ? ` and ${two(p)} Paise` : ''} Only`;
+}
 export function estimateSettings(app: App): EstimateSettings {
   const row = app.db.get<{ value: string }>("SELECT value FROM settings WHERE key = 'estimateSettings'");
   if (!row) return { ...DEFAULT_ESTIMATE_SETTINGS };
-  try { return { ...DEFAULT_ESTIMATE_SETTINGS, ...(JSON.parse(row.value) as Partial<EstimateSettings>) }; } catch { return { ...DEFAULT_ESTIMATE_SETTINGS }; }
+  try {
+    const saved = JSON.parse(row.value) as Partial<EstimateSettings>; const out = { ...DEFAULT_ESTIMATE_SETTINGS } as Record<string, unknown>;
+    // A field saved empty, or still at the first placeholder name, takes the company's standard wording.
+    for (const [k, v] of Object.entries(saved)) if (v !== '' && v != null && !(k === 'sellerName' && v === 'Loyal String' && !saved.address)) out[k] = v;
+    return out as unknown as EstimateSettings;
+  } catch { return { ...DEFAULT_ESTIMATE_SETTINGS }; }
 }
 export function saveEstimateSettings(app: App, actor: Employee, input: Partial<Record<keyof EstimateSettings, unknown>>): EstimateSettings {
   if (!canManageCatalogue(app, actor)) throw new HttpError(403, 'Only sales managers change estimate settings.');
@@ -37,7 +66,8 @@ export function saveEstimateSettings(app: App, actor: Employee, input: Partial<R
   if (!Number.isInteger(days) || days < 1 || days > 180) throw new HttpError(400, 'Validity must be a whole number of days from 1 to 180.');
   const gstin = s('gstin', 15).toUpperCase();
   if (gstin && !/^[0-9A-Z]{15}$/.test(gstin)) throw new HttpError(400, 'A GSTIN has 15 letters and digits.');
-  const next: EstimateSettings = { sellerName: s('sellerName', 100) || before.sellerName, address: s('address', 400), gstin, phone: s('phone', 40), email: s('email', 100), validityDays: days, terms: s('terms', 2000), bank: s('bank', 600), footer: s('footer', 200) };
+  const next: EstimateSettings = { sellerName: s('sellerName', 100) || before.sellerName, address: s('address', 400), gstin, phone: s('phone', 40), email: s('email', 100), website: s('website', 100), validityDays: days, terms: s('terms', 2000), notes: s('notes', 500), bank: s('bank', 600), footer: s('footer', 200),
+    logo: input.logo === undefined ? before.logo : input.logo === true || input.logo === 'on' || input.logo === 'true' || input.logo === '1' };
   app.db.run('INSERT INTO settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by', ['estimateSettings', JSON.stringify(next), nowIso(), actor.id]);
   audit(app.db, { entity: 'settings', entityId: 'estimateSettings', action: 'update', actorId: actor.id, before, after: next });
   return next;
@@ -102,7 +132,7 @@ export function setProductImage(app: App, actor: Employee, id: string, fileName:
 export type EstimateStatus = 'draft' | 'final' | 'sent' | 'accepted' | 'declined' | 'superseded';
 export interface Estimate {
   id: string; number: string; version: number; deal_id: string; customer_id: string; status: EstimateStatus; currency: string; estimate_date: string; valid_until: string; tax_mode: 'intra' | 'inter';
-  bill_name: string; bill_address: string; bill_gstin: string; bill_contact: string; subject: string; terms: string; notes: string;
+  bill_name: string; bill_address: string; bill_gstin: string; bill_contact: string; subject: string; terms: string; notes: string; place_of_supply: string;
   gross: number; discount_total: number; taxable: number; tax_total: number; total: number; share_token: string | null; sent_at: string | null; decided_at: string | null; decided_by: string; decision_note: string;
   zoho_estimate_id: string; created_by: string | null; created_at: string; updated_at: string; customer_name?: string; owner_id?: string; owner_name?: string; deal_title?: string;
 }
@@ -163,7 +193,8 @@ export function createEstimate(app: App, actor: Employee, dealId: string): Estim
     app.db.run(`INSERT INTO estimates (id, number, version, deal_id, customer_id, status, currency, estimate_date, valid_until, tax_mode, bill_name, bill_address, bill_gstin, bill_contact, subject, terms, notes, created_by, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, number, version, dealId, d.customer_id, d.currency, today, localDateString(addDays(new Date(), s.validityDays)), prev?.tax_mode || 'intra', prev?.bill_name || cust!.name, prev?.bill_address || cust!.address || cust!.city || '', prev?.bill_gstin || cust!.gstin || '',
-        prev?.bill_contact || [cust!.contact_name, cust!.phone].filter(Boolean).join(' · '), prev?.subject || d.title || '', prev ? prev.terms : s.terms, prev?.notes || '', actor.id, at, at]);
+        prev?.bill_contact || [cust!.contact_name, cust!.phone].filter(Boolean).join(' · '), prev?.subject || d.title || '', prev ? prev.terms : s.terms, prev ? prev.notes : s.notes, actor.id, at, at]);
+    app.db.run('UPDATE estimates SET place_of_supply = ? WHERE id = ?', [prev?.place_of_supply || stateLabel(homeState(s)), id]);
     if (prev) {
       for (const i of estimateItems(app, prev.id)) app.db.run('INSERT INTO estimate_items (estimate_id, position, product_id, name, description, hsn, unit, qty, rate, discount_pct, gst_rate, image_path, taxable, tax, amount) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [id, i.position, i.product_id, i.name, i.description, i.hsn, i.unit, i.qty, i.rate, i.discount_pct, i.gst_rate, i.image_path, i.taxable, i.tax, i.amount]);
@@ -174,7 +205,7 @@ export function createEstimate(app: App, actor: Employee, dealId: string): Estim
   return getEstimate(app, id)!;
 }
 
-export interface EstimateInput { validUntil?: string; estimateDate?: string; taxMode?: string; billName?: string; billAddress?: string; billGstin?: string; billContact?: string; subject?: string; terms?: string; notes?: string; items?: LineInput[] }
+export interface EstimateInput { validUntil?: string; estimateDate?: string; taxMode?: string; billName?: string; billAddress?: string; billGstin?: string; billContact?: string; placeOfSupply?: string; subject?: string; terms?: string; notes?: string; items?: LineInput[] }
 export function saveEstimate(app: App, actor: Employee, id: string, input: EstimateInput): Estimate {
   const e = requireEstimate(app, id); requireEdit(app, actor, e);
   if (e.status !== 'draft') throw new HttpError(400, 'This estimate is no longer a draft. Make a new version to change it.');
@@ -192,9 +223,13 @@ export function saveEstimate(app: App, actor: Employee, id: string, input: Estim
     return { ...line, ...computeLine(line) };
   });
   const t = computeTotals(lines); const at = nowIso();
+  // The place of supply decides the tax: the seller's own state is CGST + SGST, any other state is IGST.
+  const supplyCode = input.placeOfSupply === undefined ? '' : /^\d{2}$/.test(input.placeOfSupply) && stateLabel(input.placeOfSupply) ? input.placeOfSupply : '';
+  if (input.placeOfSupply && !supplyCode) throw new HttpError(400, 'Choose the place of supply from the list.');
+  const supply = supplyCode ? stateLabel(supplyCode) : e.place_of_supply;
   app.db.transaction(() => {
-    app.db.run('UPDATE estimates SET estimate_date = ?, valid_until = ?, tax_mode = ?, bill_name = ?, bill_address = ?, bill_gstin = ?, bill_contact = ?, subject = ?, terms = ?, notes = ?, gross = ?, discount_total = ?, taxable = ?, tax_total = ?, total = ?, updated_at = ? WHERE id = ?',
-      [estimateDate, validUntil, input.taxMode === 'inter' ? 'inter' : input.taxMode === 'intra' ? 'intra' : e.tax_mode, (input.billName ?? e.bill_name).trim().slice(0, 120) || e.bill_name, (input.billAddress ?? e.bill_address).trim().slice(0, 400), gstin, (input.billContact ?? e.bill_contact).trim().slice(0, 120),
+    app.db.run('UPDATE estimates SET place_of_supply = ?, estimate_date = ?, valid_until = ?, tax_mode = ?, bill_name = ?, bill_address = ?, bill_gstin = ?, bill_contact = ?, subject = ?, terms = ?, notes = ?, gross = ?, discount_total = ?, taxable = ?, tax_total = ?, total = ?, updated_at = ? WHERE id = ?',
+      [supply, estimateDate, validUntil, supplyCode ? (supplyCode === homeState(estimateSettings(app)) ? 'intra' : 'inter') : input.taxMode === 'inter' ? 'inter' : input.taxMode === 'intra' ? 'intra' : e.tax_mode, (input.billName ?? e.bill_name).trim().slice(0, 120) || e.bill_name, (input.billAddress ?? e.bill_address).trim().slice(0, 400), gstin, (input.billContact ?? e.bill_contact).trim().slice(0, 120),
         (input.subject ?? e.subject).trim().slice(0, 160), (input.terms ?? e.terms).trim().slice(0, 2000), (input.notes ?? e.notes).trim().slice(0, 1000), t.gross, t.discount, t.taxable, t.tax, t.total, at, id]);
     if (input.items) {
       app.db.run('DELETE FROM estimate_items WHERE estimate_id = ?', [id]);

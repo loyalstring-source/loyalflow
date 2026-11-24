@@ -7,14 +7,15 @@ import { holidaySet } from '../../lib/settings.ts';
 import { localDateString, parseLocalDate, addDays, toLocal } from '../../lib/time.ts';
 import type { Employee } from '../people/model.ts';
 
-export type DsrStyle = 'tasks' | 'collections' | 'support' | 'off';
+export type DsrStyle = 'tasks' | 'collections' | 'support' | 'hourly' | 'off';
 export const STYLES: { value: DsrStyle; label: string; help: string }[] = [
   { value: 'tasks', label: 'Tasks for the day', help: 'The lead gives each person tasks in the morning; in the evening each is marked done, partly done, not done or blocked.' },
   { value: 'collections', label: 'Collections expected today', help: 'Each person lists the customers they expect payment from and the amount; in the evening the amount received is filled in.' },
   { value: 'support', label: 'Tickets and follow-ups', help: "Shows yesterday's new tickets, everything pending and implementations in progress, with follow-up tasks for each person." },
+  { value: 'hourly', label: 'Hour-by-hour work log', help: 'Each person writes what they did against the time they did it (for example 10:00 to 11:00, bank reconciliation). The lead reads the log and accepts it in the evening.' },
   { value: 'off', label: 'No daily review', help: 'This team does not hold one.' }
 ];
-const DEFAULT_STYLE: Record<string, DsrStyle> = { SAL: 'collections', SUP: 'support' };
+const DEFAULT_STYLE: Record<string, DsrStyle> = { SAL: 'collections', SUP: 'support', ACC: 'hourly' };
 export type ItemStatus = 'planned' | 'done' | 'partial' | 'not_done' | 'blocked';
 export const STATUS_LABEL: Record<ItemStatus, string> = { planned: 'Not reviewed', done: 'Done', partial: 'Partly done', not_done: 'Not done', blocked: 'Blocked' };
 const REVIEWED: ItemStatus[] = ['done', 'partial', 'not_done', 'blocked'];
@@ -25,7 +26,7 @@ export interface DsrItem {
   id: string; department_id: string; day: string; employee_id: string; employee_name: string; kind: 'task' | 'collection'; title: string; customer: string; ref: string;
   planned_hours: number | null; amount_expected: number | null; self_status: string; self_pct: number | null; self_amount: number | null; self_note: string; self_at: string | null;
   status: ItemStatus; pct: number | null; amount_actual: number | null; remark: string; reviewed_by: string | null; reviewed_at: string | null;
-  carry: '' | 'carry' | 'drop'; carried_from: string | null; carried_to: string | null; carry_count: number; created_by: string | null; created_at: string;
+  carry: '' | 'carry' | 'drop'; carried_from: string | null; carried_to: string | null; carry_count: number; created_by: string | null; created_at: string; slot_from: string; slot_to: string;
 }
 export interface Team { id: string; name: string; code: string; style: DsrStyle; lead: boolean; hodId: string | null }
 interface Dept { id: string; name: string; code: string; hod_id: string | null }
@@ -101,7 +102,7 @@ function ensureDay(app: App, deptId: string, day: string): void {
 
 // ---------- lines ----------
 const ITEM_SELECT = 'SELECT i.*, e.full_name AS employee_name FROM dsr_items i JOIN employees e ON e.id = i.employee_id';
-export function listItems(app: App, deptId: string, day: string): DsrItem[] { return app.db.all<DsrItem>(`${ITEM_SELECT} WHERE i.department_id = ? AND i.day = ? ORDER BY e.full_name, i.created_at, i.id`, [deptId, day]); }
+export function listItems(app: App, deptId: string, day: string): DsrItem[] { return app.db.all<DsrItem>(`${ITEM_SELECT} WHERE i.department_id = ? AND i.day = ? ORDER BY e.full_name, i.slot_from, i.created_at, i.id`, [deptId, day]); }
 export function getItem(app: App, id: string): DsrItem | undefined { return app.db.get<DsrItem>(`${ITEM_SELECT} WHERE i.id = ?`, [id]); }
 function requireOpenItem(app: App, id: string): DsrItem {
   const it = getItem(app, id); if (!it) throw new HttpError(404, 'That line is no longer there.');
@@ -109,7 +110,7 @@ function requireOpenItem(app: App, id: string): DsrItem {
   return it;
 }
 /** My lines for a day, across teams (for the home page). */
-export function myItems(app: App, employeeId: string, day: string): DsrItem[] { return app.db.all<DsrItem>(`${ITEM_SELECT} WHERE i.employee_id = ? AND i.day = ? ORDER BY i.created_at, i.id`, [employeeId, day]); }
+export function myItems(app: App, employeeId: string, day: string): DsrItem[] { return app.db.all<DsrItem>(`${ITEM_SELECT} WHERE i.employee_id = ? AND i.day = ? ORDER BY i.slot_from, i.created_at, i.id`, [employeeId, day]); }
 
 /** Where a reference such as a board item, ticket or deal number leads. */
 export function refTarget(app: App, ref: string): { href: string; title: string } | null {
@@ -120,7 +121,10 @@ export function refTarget(app: App, ref: string): { href: string; title: string 
   return null;
 }
 
-export interface NewItem { deptId: string; day: string; employeeId: string; title?: unknown; customer?: unknown; ref?: unknown; plannedHours?: unknown; amountExpected?: unknown }
+export interface NewItem { deptId: string; day: string; employeeId: string; title?: unknown; customer?: unknown; ref?: unknown; plannedHours?: unknown; amountExpected?: unknown; slotFrom?: unknown; slotTo?: unknown }
+const minutesOf = (hm: string): number => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3));
+/** Hours an hour-by-hour entry covers. */
+export const slotHours = (it: { slot_from: string; slot_to: string }): number => (it.slot_from && it.slot_to ? Math.round(((minutesOf(it.slot_to) - minutesOf(it.slot_from)) / 60) * 100) / 100 : 0);
 export function addItem(app: App, actor: Employee, input: NewItem): DsrItem {
   const d = dept(app, input.deptId); const style = styleOf(app, d.id);
   if (style === 'off') throw new HttpError(400, `${d.name} does not hold a daily review.`);
@@ -133,6 +137,24 @@ export function addItem(app: App, actor: Employee, input: NewItem): DsrItem {
   if (!lead && input.day < today()) throw new HttpError(400, 'Only the team lead adds lines to a past day.');
   if (input.day > localDateString(addDays(new Date(), 31))) throw new HttpError(400, 'Plan at most a month ahead.');
   const kind = style === 'collections' ? 'collection' : 'task';
+  if (style === 'hourly') {
+    // An hour-by-hour entry is work already done: it carries its time, counts as the person's own "done", and waits for the lead to accept it.
+    const from = String(input.slotFrom ?? ''); const to = String(input.slotTo ?? ''); const what = clean(input.title, 300); const hm = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (!hm.test(from) || !hm.test(to)) throw new HttpError(400, 'Enter the time from and to, for example 10:00 to 11:00.');
+    if (minutesOf(to) <= minutesOf(from)) throw new HttpError(400, 'The end time must be after the start time.');
+    if (minutesOf(to) - minutesOf(from) > 240) throw new HttpError(400, 'One entry covers at most 4 hours. Split longer work into separate entries.');
+    if (!what) throw new HttpError(400, 'Write what was done in that time.');
+    if (input.day > today()) throw new HttpError(400, 'Work is logged after it is done, not ahead of time.');
+    if (!lead && input.day < localDateString(addDays(new Date(), -2))) throw new HttpError(400, 'Entries older than two days are added by the team lead.');
+    const clash = app.db.get<{ slot_from: string; slot_to: string }>("SELECT slot_from, slot_to FROM dsr_items WHERE employee_id = ? AND day = ? AND slot_from <> '' AND slot_from < ? AND slot_to > ?", [input.employeeId, input.day, to, from]);
+    if (clash) throw new HttpError(400, `That time overlaps an entry already logged from ${clash.slot_from} to ${clash.slot_to}.`);
+    ensureDay(app, d.id, input.day);
+    const hid = app.db.nextId('DS'); const at = new Date().toISOString(); const mine = input.employeeId === actor.id;
+    app.db.run("INSERT INTO dsr_items (id, department_id, day, employee_id, kind, title, slot_from, slot_to, planned_hours, self_status, self_pct, self_at, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, 'task', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [hid, d.id, input.day, input.employeeId, what, from, to, Math.round(((minutesOf(to) - minutesOf(from)) / 60) * 100) / 100, mine ? 'done' : '', mine ? 100 : null, mine ? at : null, actor.id, at, at]);
+    audit(app.db, { entity: 'dsr_item', entityId: hid, action: 'create', after: { day: input.day, employeeId: input.employeeId, from, to, title: what }, actorId: actor.id });
+    return getItem(app, hid)!;
+  }
   const ref = clean(input.ref, 40); const target = refTarget(app, ref);
   if (ref && !target) throw new HttpError(400, `There is no board item, ticket or deal numbered ${ref}.`);
   let title = clean(input.title, 300); const customer = clean(input.customer, 160);
@@ -177,10 +199,13 @@ export function selfUpdate(app: App, actor: Employee, id: string, input: { statu
   return getItem(app, id)!;
 }
 
+/** In an hour-by-hour log nobody accepts their own entries, unless they run the company. */
+export const ownLog = (actor: Employee, it: { slot_from: string; employee_id: string }): boolean => !!it.slot_from && it.employee_id === actor.id && !(actor.is_admin || actor.functional_role === 'executive');
 /** The lead confirms a line. */
 export function reviewItem(app: App, actor: Employee, id: string, input: { status?: unknown; pct?: unknown; amount?: unknown; remark?: unknown; carry?: unknown; title?: unknown; plannedHours?: unknown; amountExpected?: unknown }): DsrItem {
   const it = requireOpenItem(app, id);
   if (!canLead(app, actor, it.department_id)) throw new HttpError(403, 'Only the team lead reviews the day.');
+  if (ownLog(actor, it)) throw new HttpError(403, 'Your own work log is accepted by your manager, not by you.');
   const remark = input.remark === undefined ? it.remark : clean(input.remark, 500);
   let status: ItemStatus = it.status; let pct = it.pct; let got = it.amount_actual;
   const expected = input.amountExpected === undefined ? it.amount_expected : amount(input.amountExpected, 'Expected amount');
@@ -205,7 +230,7 @@ export function acceptSelfUpdates(app: App, actor: Employee, deptId: string, day
   if (isClosed(app, deptId, day)) throw new HttpError(409, 'This day is closed.');
   let n = 0;
   for (const it of listItems(app, deptId, day)) {
-    if (it.status !== 'planned') continue;
+    if (it.status !== 'planned' || ownLog(actor, it)) continue;
     if (it.kind === 'collection') { if (it.self_amount == null) continue; reviewItem(app, actor, it.id, { amount: it.self_amount }); n++; }
     else if (it.self_status) { reviewItem(app, actor, it.id, { status: it.self_status, pct: it.self_pct ?? '' }); n++; }
   }
@@ -221,6 +246,7 @@ export function closeDay(app: App, actor: Employee, deptId: string, day: string,
   if (day > today()) throw new HttpError(400, 'A day cannot be closed before it arrives.');
   if (isClosed(app, deptId, day)) throw new HttpError(409, 'This day is already closed.');
   const items = listItems(app, deptId, day); if (!items.length) throw new HttpError(400, 'There is nothing planned for this day to close.');
+  if (items.some((it) => ownLog(actor, it))) throw new HttpError(403, 'This day holds your own work log, so your manager closes it.');
   ensureDay(app, deptId, day);
   let to = nextWorkingDay(app, day); for (let i = 0; i < 10 && isClosed(app, deptId, to); i++) to = nextWorkingDay(app, to);
   const now = new Date().toISOString(); let carried = 0;
@@ -271,7 +297,7 @@ export function reopenDay(app: App, actor: Employee, deptId: string, day: string
 }
 
 // ---------- figures ----------
-export interface Summary { lines: number; done: number; partial: number; notDone: number; blocked: number; waiting: number; updated: number; hours: number; expected: number; collected: number; carriedIn: number }
+export interface Summary { logged: number; people: number; lines: number; done: number; partial: number; notDone: number; blocked: number; waiting: number; updated: number; hours: number; expected: number; collected: number; carriedIn: number }
 /** What a line stands at right now: the review if there is one, otherwise the person's own update. */
 export function standing(it: DsrItem): { status: ItemStatus; got: number | null; confirmed: boolean } {
   if (it.status !== 'planned') return { status: it.status, got: it.amount_actual, confirmed: true };
@@ -279,7 +305,7 @@ export function standing(it: DsrItem): { status: ItemStatus; got: number | null;
   return { status: (it.self_status || 'planned') as ItemStatus, got: null, confirmed: false };
 }
 export function summarise(items: DsrItem[]): Summary {
-  const s: Summary = { lines: items.length, done: 0, partial: 0, notDone: 0, blocked: 0, waiting: 0, updated: 0, hours: 0, expected: 0, collected: 0, carriedIn: 0 };
+  const s: Summary = { logged: Math.round(items.reduce((a, i) => a + slotHours(i), 0) * 100) / 100, people: new Set(items.map((i) => i.employee_id)).size, lines: items.length, done: 0, partial: 0, notDone: 0, blocked: 0, waiting: 0, updated: 0, hours: 0, expected: 0, collected: 0, carriedIn: 0 };
   for (const it of items) {
     const st = standing(it);
     if (st.status === 'done') s.done++; else if (st.status === 'partial') s.partial++; else if (st.status === 'not_done') s.notDone++; else if (st.status === 'blocked') s.blocked++; else s.waiting++;

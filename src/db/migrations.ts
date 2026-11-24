@@ -1207,5 +1207,15 @@ CREATE TABLE target_setters (
 );
 CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(date);
 `
+  },
+  {
+    id: '0016_estimate_supply_and_hourly_log',
+    sql: `
+-- Place of supply printed on an estimate (state name with its GST code).
+ALTER TABLE estimates ADD COLUMN place_of_supply TEXT NOT NULL DEFAULT '';
+-- Hour-by-hour work log: the time a daily-review line covers.
+ALTER TABLE dsr_items ADD COLUMN slot_from TEXT NOT NULL DEFAULT '';
+ALTER TABLE dsr_items ADD COLUMN slot_to TEXT NOT NULL DEFAULT '';
+`
   }
 ];

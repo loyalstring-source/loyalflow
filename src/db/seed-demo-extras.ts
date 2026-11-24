@@ -70,6 +70,25 @@ export function seedDemoExtras(app: App, now = new Date()): void {
           if (!isToday) close(id, day, lead);
         }
       }
+      // Accounts keeps an hour-by-hour log.
+      const acc = deptId('ACC'); const accountants = team('ACC');
+      if (acc && accountants.length) {
+        const head = db.get<{ hod_id: string | null }>('SELECT hod_id FROM departments WHERE id = ?', [acc])?.hod_id || coo.id;
+        const WORK = ['Bank reconciliation', 'Sales invoices in Zoho Books', 'Vendor payments', 'GST working for the month', 'Follow up on receivables', 'Expense claims checked', 'TDS entries', 'Petty cash and vouchers', 'Purchase bills entered', 'Salary working with HR', 'Ledger scrutiny', 'Replying to the auditor'];
+        const SLOTS = [['09:30', '10:30'], ['10:30', '11:30'], ['11:30', '13:00'], ['14:00', '15:00'], ['15:00', '16:30'], ['16:30', '18:00']];
+        for (const day of days) {
+          const isToday = day === today;
+          for (const p of accountants.slice(0, 4)) {
+            const upto = isToday ? 3 : SLOTS.length;
+            for (let i = 0; i < upto; i++) {
+              const [f, t] = SLOTS[i]; const hrs = (Number(t.slice(0, 2)) * 60 + Number(t.slice(3)) - Number(f.slice(0, 2)) * 60 - Number(f.slice(3))) / 60; const at = `${day}T05:00:00.000Z`;
+              db.run("INSERT INTO dsr_items (id, department_id, day, employee_id, kind, title, slot_from, slot_to, planned_hours, self_status, self_pct, self_at, status, pct, reviewed_by, reviewed_at, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, 'task', ?, ?, ?, ?, 'done', 100, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [db.nextId('DS'), acc, day, p.id, pick([...WORK]), f, t, hrs, at, isToday ? 'planned' : 'done', isToday ? null : 100, isToday ? null : head, isToday ? null : `${day}T12:30:00.000Z`, p.id, at, at]);
+            }
+          }
+          if (!isToday) close(acc, day, head);
+        }
+      }
       const sal = deptId('SAL'); const sellers = team('SAL');
       if (sal && sellers.length) {
         const head = db.get<{ hod_id: string | null }>('SELECT hod_id FROM departments WHERE id = ?', [sal])?.hod_id || coo.id;

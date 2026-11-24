@@ -2,6 +2,8 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { startServer, Client, type TestServer, testApp, emp, COO, BDM, SALES_HEAD, SUPPORT_IC, SUPPORT_LEAD, DEV_LEAD } from '../helpers.ts';
+import { getEmployee } from '../../src/modules/people/model.ts';
+const getEmployeeById = (app: { db: Parameters<typeof getEmployee>[0] }, id: string) => getEmployee(app.db, id)!;
 import { addItem, selfUpdate, reviewItem, acceptSelfUpdates, closeDay, reopenDay, listItems, getItem, getDay, summarise, teamsFor, canLead, styleOf, saveStyles, nextWorkingDay, today, deleteItem, myItems, supportPanels } from '../../src/modules/dsr/service.ts';
 
 const KARAN = 'karan.bhoite@loyalstring.com'; const DEV_IC = 'akash.panbhare@loyalstring.com';
@@ -121,6 +123,28 @@ describe('a sales day', () => {
     assert.deepEqual(next.map((i) => [i.customer, i.amount_expected]), [['Kalyan Gold', 25000], ['Omkar Tech', 50000]]);
     assert.equal(getItem(app, b.id)!.amount_actual, 40000, 'the own figure stands when the lead did not change it');
     assert.equal(getItem(app, c.id)!.status, 'not_done');
+  });
+});
+
+describe('an accounts day: the hour-by-hour log', () => {
+  test('each entry has a time and what was done; the lead accepts and closes', () => {
+    const app = testApp(); const day = today(); assert.equal(styleOf(app, 'ACC'), 'hourly');
+    const people = app.db.all<{ id: string }>("SELECT id FROM employees WHERE department_id = 'ACC' AND status = 'active' ORDER BY id"); const me = getEmployeeById(app, people[0].id); const coo = emp(app, COO);
+    const a = addItem(app, me, { deptId: 'ACC', day, employeeId: me.id, slotFrom: '10:00', slotTo: '11:00', title: 'Bank reconciliation' });
+    assert.deepEqual([a.slot_from, a.slot_to, a.planned_hours, a.self_status, a.status, a.kind], ['10:00', '11:00', 1, 'done', 'planned', 'task']);
+    addItem(app, me, { deptId: 'ACC', day, employeeId: me.id, slotFrom: '11:00', slotTo: '12:30', title: 'Vendor payments' });
+    assert.throws(() => addItem(app, me, { deptId: 'ACC', day, employeeId: me.id, slotFrom: '10:30', slotTo: '11:30', title: 'x' }), /overlaps an entry already logged from 10:00 to 11:00/);
+    assert.throws(() => addItem(app, me, { deptId: 'ACC', day, employeeId: me.id, slotFrom: '14:00', slotTo: '13:00', title: 'x' }), /after the start/);
+    assert.throws(() => addItem(app, me, { deptId: 'ACC', day, employeeId: me.id, slotFrom: '14:00', slotTo: '19:00', title: 'x' }), /at most 4 hours/);
+    assert.throws(() => addItem(app, me, { deptId: 'ACC', day, employeeId: me.id, slotFrom: '14:00', slotTo: '15:00', title: '' }), /what was done/);
+    assert.throws(() => addItem(app, me, { deptId: 'ACC', day, employeeId: me.id, title: 'no time' }), /time from and to/);
+    assert.throws(() => addItem(app, me, { deptId: 'ACC', day: nextWorkingDay(app, day), employeeId: me.id, slotFrom: '10:00', slotTo: '11:00', title: 'x' }), /after it is done/);
+    const sum = summarise(listItems(app, 'ACC', day)); assert.deepEqual([sum.logged, sum.people, sum.lines, sum.done], [2.5, 1, 2, 2]);
+    // The accountant heads Accounts, but nobody accepts or closes their own log.
+    assert.throws(() => reviewItem(app, me, a.id, { status: 'done' }), /accepted by your manager/); assert.equal(acceptSelfUpdates(app, me, 'ACC', day), 0);
+    assert.throws(() => closeDay(app, me, 'ACC', day), /your manager closes it/);
+    assert.equal(acceptSelfUpdates(app, coo, 'ACC', day), 2);
+    const res = closeDay(app, coo, 'ACC', day); assert.deepEqual([res.counts.done, res.carried], [2, 0]);
   });
 });
 

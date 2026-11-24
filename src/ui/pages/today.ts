@@ -31,6 +31,8 @@ export interface TodayData {
   alerts: { text: string; href: string; tone: 'crit' | 'warn' | 'accent' | 'good' }[];
   teamTiles: Tile[];
   leave: { code: string; label: string; quota: number; used: number; active: boolean }[];
+  /** My team keeps an hour-by-hour work log. */
+  dsrHourly?: boolean;
   /** My lines on today's daily review. */
   dsr?: { id: string; kind: string; title: string; customer: string; amount_expected: number | null; planned_hours: number | null; status: string; self_status: string; department_id: string }[];
   pwChanged: boolean;
@@ -62,7 +64,10 @@ export function todayPage(v: View, d: TodayData): Raw {
     : html`<button class="btn btn-primary" type="button" data-post="/attendance/check-in" data-gps data-burst="#6BE3A8">${icon('pin', 14)} Check in for today</button>`;
   const apps = html`<section class="card reveal"><div class="card-head"><h2>Your apps</h2></div><div class="apps">${modulesFor(v).filter((m) => m.key !== 'home').map((m) => html`<a class="appicon" href="${m.tabs[0].href}"><span class="sq sq-lg sq-${m.tone}">${icon(m.icon, 22)}</span>${m.name}</a>`)}</div></section>`;
   const dsrLines = d.dsr || [];
-  const myDay = dsrLines.length ? html`<section class="card reveal"><div class="card-head"><h2>Your day plan</h2><a class="small" href="/dsr">Update</a></div>
+  const myDay = d.dsrHourly ? html`<section class="card reveal"><div class="card-head"><h2>Your work log today</h2><a class="small" href="/dsr">${dsrLines.length ? 'Add an entry' : 'Start'}</a></div>
+    ${dsrLines.length ? html`<ul class="list" style="margin-top:4px">${dsrLines.slice(-6).map((i) => html`<li style="display:flex;gap:10px"><b class="num" style="white-space:nowrap">${(i as { slot_from?: string }).slot_from || ''}</b><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.title}</span></li>`)}</ul><p class="small muted" style="margin:6px 0 0">${Math.round(dsrLines.reduce((a, i) => a + (i.planned_hours || 0), 0) * 10) / 10} hours logged so far</p>`
+      : html`<p class="small muted" style="margin:4px 0 8px">Nothing logged yet. Write what you did against the time, as you go through the day.</p>${button('Log your work', { href: '/dsr', kind: 'primary', size: 'sm' })}`}</section>`
+    : dsrLines.length ? html`<section class="card reveal"><div class="card-head"><h2>Your day plan</h2><a class="small" href="/dsr">Update</a></div>
     <ul class="list" style="margin-top:4px">${dsrLines.slice(0, 8).map((i) => { const st = i.status !== 'planned' ? i.status : i.self_status; return html`<li style="display:flex;justify-content:space-between;gap:10px;align-items:center"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.kind === 'collection' ? `${i.customer} · ₹${Math.round(i.amount_expected || 0).toLocaleString('en-IN')}` : i.title}</span><span class="pill pill-${st === 'done' ? 'good' : st === 'partial' ? 'warn' : st ? 'crit' : 'ink'}">${st === 'done' ? 'Done' : st === 'partial' ? 'Partly' : st === 'blocked' ? 'Blocked' : st === 'not_done' ? 'Not done' : 'To do'}</span></li>`; })}</ul>
     ${when(dsrLines.length > 8, () => html`<p class="small muted" style="margin:6px 0 0">and ${dsrLines.length - 8} more</p>`)}</section>` : html``;
   const waiting = d.approvals.length + d.alerts.length;

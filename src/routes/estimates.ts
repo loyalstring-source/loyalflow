@@ -87,7 +87,7 @@ export function register(r: Router<Employee>, app: App): void {
     const me = user(ctx); const b = await ctx.body();
     const items = Array.isArray(b.items) ? (b.items as Record<string, unknown>[]).map((i): LineInput => ({ productId: String(i.productId || '') || null, name: String(i.name || ''), description: String(i.description || ''), hsn: String(i.hsn || ''), unit: String(i.unit || ''), qty: i.qty as string, rate: i.rate as string, discountPct: i.discountPct as string, gstRate: i.gstRate as string })) : undefined;
     saveEstimate(app, me, ctx.params.id, { billName: str(b, 'billName') || undefined, billGstin: b.billGstin === undefined ? undefined : str(b, 'billGstin'), billContact: b.billContact === undefined ? undefined : str(b, 'billContact'), billAddress: b.billAddress === undefined ? undefined : str(b, 'billAddress'),
-      estimateDate: str(b, 'estimateDate') || undefined, validUntil: str(b, 'validUntil') || undefined, taxMode: str(b, 'taxMode') || undefined, subject: b.subject === undefined ? undefined : str(b, 'subject'), notes: b.notes === undefined ? undefined : str(b, 'notes'), terms: b.terms === undefined ? undefined : str(b, 'terms'), items });
+      estimateDate: str(b, 'estimateDate') || undefined, validUntil: str(b, 'validUntil') || undefined, taxMode: str(b, 'taxMode') || undefined, placeOfSupply: b.placeOfSupply === undefined ? undefined : str(b, 'placeOfSupply'), subject: b.subject === undefined ? undefined : str(b, 'subject'), notes: b.notes === undefined ? undefined : str(b, 'notes'), terms: b.terms === undefined ? undefined : str(b, 'terms'), items });
     return done(ctx, { toast: { title: 'Draft saved', kind: 'success' } });
   });
   r.post('/estimates/:id/finalise', (ctx) => {

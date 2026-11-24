@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.19.0 — 24 Nov 2026
+Estimates in the company's own format, and an hour-by-hour work log for Accounts.
+- **Estimates now print like the company's existing estimates.** Loyal String logo, "Loyal String International Pvt. Ltd.", the Bhosari address, email, website, phone and GSTIN at the top; Estimate number, date and valid-until; Place of supply and Sales person; Bill To; items with HSN/SAC, quantity, rate, amount, taxable amount and the tax columns; Sub total, Total and Total in words; Notes, Company bank details, Terms and conditions and Authorized signature. The customer's link shows the same page.
+- **Place of supply decides the tax.** Choose the customer's state on the estimate: Maharashtra gives CGST + SGST, any other state gives IGST.
+- **Company details are filled in by default** and can be changed under Sales → Estimates → Settings (website, note, bank details, and whether to show the logo).
+- **Hour-by-hour work log** as a new daily-review style, switched on for Accounts. The person logs what they did against the time they did it (from, to, what). Entries cannot overlap, run past four hours or be in the future. Nobody accepts or closes their own log: for Accounts, an executive or administrator does it.
+- The home page shows "Your work log today" for people on this style, and after midday the company overview flags anyone who has logged nothing.
+- Any team can be moved to this style under Daily review → Meeting style for each team.
+
 ## 1.18.0 — 24 Nov 2026
 Readiness check before hosting, and a fuller demo.
 - **Every screen checked as every kind of user.** A new check (`node tests/crawl.ts demo` or `real`) signs in as 11 kinds of people and opens every link the screens offer: about 6,000 page loads on demo data and 5,400 on an empty real system. It found no crashes. It did find links that led to "not allowed" pages; those are fixed:

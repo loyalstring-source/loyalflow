@@ -24,12 +24,12 @@ export function register(r: Router<Employee>, app: App): void {
     return htmlResponse(dsrPage(v, {
       teams, team, day, today: today(), prev: prevWorkingDay(app, day), next: nextWorkingDay(app, day), record: getDay(app, team.id, day), items, summary: summarise(items),
       members: teamMembers(app, team.id), refs: refOptions(app, team), customers: team.style === 'collections' ? customerNames(app) : [],
-      support: team.style === 'support' ? supportPanels(app, day) : null, canConfigure: canConfigure(v.user), app
+      support: team.style === 'support' ? supportPanels(app, day) : null, canConfigure: canConfigure(v.user), app, viewer: v.user
     }));
   });
 
   r.post('/dsr/items', (ctx) => attempt(ctx, (b) => {
-    const it = addItem(app, user(ctx), { deptId: str(b, 'team'), day: str(b, 'day'), employeeId: str(b, 'employeeId'), title: b.title, customer: b.customer, ref: b.ref, plannedHours: b.plannedHours, amountExpected: b.amountExpected });
+    const it = addItem(app, user(ctx), { deptId: str(b, 'team'), day: str(b, 'day'), employeeId: str(b, 'employeeId'), title: b.title, customer: b.customer, ref: b.ref, plannedHours: b.plannedHours, amountExpected: b.amountExpected, slotFrom: b.slotFrom, slotTo: b.slotTo });
     return { reload: true, toast: { title: 'Added', body: it.kind === 'collection' ? it.customer : it.title, kind: 'success' } };
   }));
   r.post('/dsr/items/:id/self', (ctx) => attempt(ctx, (b) => { selfUpdate(app, user(ctx), ctx.params.id, { status: b.status, pct: b.pct, amount: b.amount, note: b.note }); return {}; }));

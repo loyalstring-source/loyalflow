@@ -24,6 +24,26 @@ describe('the sums', () => {
   });
 });
 
+describe('what is printed', () => {
+  test('the amount in words reads the Indian way', async () => {
+    const { amountInWords } = await import('../../src/modules/sales/estimates.ts');
+    assert.equal(amountInWords(330105), 'Indian Rupee Three Lakh Thirty Thousand One Hundred Five Only');
+    assert.equal(amountInWords(208122.5), 'Indian Rupee Two Lakh Eight Thousand One Hundred Twenty Two and Fifty Paise Only');
+    assert.equal(amountInWords(12500000), 'Indian Rupee One Crore Twenty Five Lakh Only'); assert.equal(amountInWords(19), 'Indian Rupee Nineteen Only'); assert.equal(amountInWords(0), 'Indian Rupee Zero Only');
+  });
+  test('the company block, bank details and terms come filled in; the place of supply sets the GST type', async () => {
+    const m = await import('../../src/modules/sales/estimates.ts'); const app = testApp(); const st = m.estimateSettings(app);
+    assert.equal(st.sellerName, 'Loyal String International Pvt. Ltd.'); assert.equal(st.gstin, '27AAECL0344H1ZQ'); assert.match(st.address, /PCNTDA MIDC Bhosari/); assert.match(st.bank, /IFSC Code/); assert.match(st.terms, /100% Advance/); assert.equal(st.logo, true);
+    assert.equal(m.homeState(st), '27'); assert.equal(m.stateLabel('29'), 'Karnataka (29)'); assert.equal(m.stateCodeOf('Karnataka (29)'), '29');
+    const bdm = emp(app, BDM); const deal = createDeal(app, bdm, { customerName: 'Tulasi Jewellers', title: 'RFID for the showroom', value: 300000 });
+    const e = createEstimate(app, bdm, deal.id); assert.equal(e.place_of_supply, 'Maharashtra (27)'); assert.equal(e.notes, 'Looking forward for your business.');
+    const k = saveEstimate(app, bdm, e.id, { placeOfSupply: '29', items: [{ name: 'RFID handheld reader', qty: 1, rate: 105000, gstRate: 18, hsn: '84719000' }] });
+    assert.equal(k.place_of_supply, 'Karnataka (29)'); assert.equal(k.tax_mode, 'inter'); assert.equal(k.total, 123900);
+    assert.equal(saveEstimate(app, bdm, e.id, { placeOfSupply: '27' }).tax_mode, 'intra');
+    assert.throws(() => saveEstimate(app, bdm, e.id, { placeOfSupply: '99' }), /place of supply/);
+  });
+});
+
 describe('products', () => {
   test('a sales manager adds a product with a picture; others cannot; bad input is refused', () => {
     const app = testApp(); const head = emp(app, SALES_HEAD); const bdm = emp(app, BDM);
@@ -80,7 +100,7 @@ describe('an estimate from draft to the customer', () => {
 
     const customer = new Client(s.base);   // not signed in
     const pub = await customer.get(`/e/${e.share_token}`); assert.equal(pub.status, 200); const h = await pub.text();
-    for (const x of ['Loyal String Pvt Ltd', '27ABCDE1234F1Z5', 'Handheld Reader T1', 'CGST 9%', 'SGST 9%', 'CGST 6%', '1,03,580.00', 'Accept this estimate']) assert.ok(h.includes(x), x);
+    for (const x of ['Loyal String Pvt Ltd', '27ABCDE1234F1Z5', 'Handheld Reader T1', 'CGST', 'SGST', '>9%<', '>6%<', 'Total In Words', 'Place Of Supply', '1,03,580.00', 'Accept this estimate']) assert.ok(h.includes(x), x);
     assert.ok(!h.includes('IGST') && !h.includes('/static/app.js'), 'no staff screens or scripts on the customer page');
     const img = await customer.get(`/e/${e.share_token}/img/${items[0].id}`); assert.equal(img.status, 200); assert.equal(img.headers.get('content-type'), 'image/png');
     assert.equal((await customer.get(`/estimates/${id}`)).status, 303, 'the staff page still needs a sign-in');
