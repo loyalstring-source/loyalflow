@@ -9,11 +9,13 @@ export interface Notifier {
   sendMany(ids: string[], n: Omit<Notice, 'employeeId'>): void;
 }
 
-export function createNotifier(db: Db, mailer: Mailer, baseUrl: string): Notifier {
+export function createNotifier(db: Db, mailer: Mailer, baseUrl: string, push?: { toEmployee(employeeId: string, m: { title: string; body?: string; link?: string }): Promise<number> }): Notifier {
   function send(n: Notice): void {
     const at = new Date().toISOString();
     db.run('INSERT INTO notifications (employee_id, title, body, link, kind, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       [n.employeeId, n.title, n.body || '', n.link || '', n.kind || 'info', at]);
+    // To the person's phone or browser as well, if they have turned that on. It is sent in the background and never holds anything up.
+    if (push) void push.toEmployee(n.employeeId, { title: n.title, body: n.body, link: n.link }).catch(() => 0);
     if (n.email === false) return;
     const emp = getEmployee(db, n.employeeId);
     if (!emp || emp.status !== 'active') return;

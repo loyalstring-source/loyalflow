@@ -19,10 +19,10 @@ import { localDateString, addDays, toLocal, fmtDate } from '../lib/time.ts';
 import { scopeFor } from '../lib/scope.ts';
 import { todayPage, type TodayData } from '../ui/pages/today.ts';
 import { page } from '../ui/layout.ts';
-import { html } from '../lib/html.ts';
+import { html, when } from '../lib/html.ts';
 import { empty, icon } from '../ui/components.ts';
 import { relativeAge } from '../lib/time.ts';
-import { done, view, str, user, type RCtx } from './helpers.ts';
+import { done, fail, view, str, user, type RCtx } from './helpers.ts';
 import { audit } from '../lib/audit.ts';
 import { dayValue } from '../modules/hr/attendance.ts';
 import { recomputeMonth } from '../modules/hr/attendance-rules.ts';
@@ -129,11 +129,24 @@ export function register(r: Router<Employee>, app: App): void {
     return done(ctx, { reload: true });
   });
 
+  // ----- Notifications on this phone or browser (web push) -----
+  r.get('/push/key', () => htmlResponse(JSON.stringify({ ok: true, key: app.push.publicKey }), 200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }));
+  r.post('/push/subscribe', async (ctx) => {
+    const me = user(ctx); const b = await ctx.body();
+    try { app.push.subscribe(me.id, b as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } }, String(ctx.req.headers['user-agent'] || '')); } catch (e) { return fail(ctx, 400, (e as Error).message); }
+    return done(ctx, { toast: { title: 'Notifications are on for this device', kind: 'success' } });
+  });
+  r.post('/push/unsubscribe', async (ctx) => { const me = user(ctx); const b = await ctx.body(); app.push.unsubscribe(me.id, str(b, 'endpoint')); return done(ctx, { toast: { title: 'Notifications are off for this device', kind: 'info' } }); });
+  r.post('/push/test', async (ctx) => {
+    const me = user(ctx); const n = await app.push.toEmployee(me.id, { title: 'LoyalFlow notifications are working', body: 'This is a test sent by you.', link: '/notifications' });
+    return n ? done(ctx, { toast: { title: `Test sent to ${n} device${n === 1 ? '' : 's'}`, body: 'It should appear within a few seconds.', kind: 'success' } }) : fail(ctx, 400, app.push.devices(me.id).length ? 'The test could not be delivered. Turn notifications off and on again on this device.' : 'Turn notifications on for this device first.');
+  });
   r.get('/notifications', (ctx) => {
     const v = view(ctx);
-    const rows = unreadNotifications(app.db, v.user.id, 60);
+    const rows = unreadNotifications(app.db, v.user.id, 60); const devices = app.push.devices(v.user.id);
     markAllRead(app.db, v.user.id);
-    return htmlResponse(page(v, { title: 'Notifications', subtitle: 'Everything that was sent to you, newest first. Opening this page marks them read.', body: html`<section class="card">${rows.length ? html`<ul class="list">${rows.map((n) => html`<li><span class="dot dot-${n.kind === 'critical' ? 'crit' : n.kind === 'warn' ? 'warn' : n.kind === 'success' ? 'good' : 'accent'}"></span><a href="${n.link || '#'}" style="flex:1;min-width:0;text-decoration:none;color:inherit"><b style="display:block;font-size:13px;${n.read_at ? 'font-weight:500' : ''}">${n.title}</b><span class="small muted">${n.body}</span></a><span class="xs faint">${relativeAge(n.created_at)}</span>${icon('arrow', 16, 'faint')}</li>`)}</ul>` : empty('No notifications yet.', '🔔')}</section>` }));
+    return htmlResponse(page(v, { title: 'Notifications', subtitle: 'Everything that was sent to you, newest first. Opening this page marks them read.', body: html`<section class="card push-card" data-push-card><div class="card-head"><h2>On this device</h2><span class="small muted" data-push-state>Checking…</span></div><p class="small muted" data-push-help style="margin:4px 0 10px">Get a notification on this phone or computer when something needs you, even when LoyalFlow is closed.</p><div class="row" style="gap:8px"><button class="btn btn-primary" type="button" data-push-on hidden>Turn on notifications</button><button class="btn" type="button" data-push-off hidden>Turn off on this device</button><button class="btn" type="button" data-post="/push/test" data-push-test hidden>Send a test</button></div>${when(devices.length, () => html`<p class="small muted" style="margin:10px 0 0">On for: ${devices.map((d) => d.label).join(', ')}</p>`)}</section>
+      <section class="card">${rows.length ? html`<ul class="list">${rows.map((n) => html`<li><span class="dot dot-${n.kind === 'critical' ? 'crit' : n.kind === 'warn' ? 'warn' : n.kind === 'success' ? 'good' : 'accent'}"></span><a href="${n.link || '#'}" style="flex:1;min-width:0;text-decoration:none;color:inherit"><b style="display:block;font-size:13px;${n.read_at ? 'font-weight:500' : ''}">${n.title}</b><span class="small muted">${n.body}</span></a><span class="xs faint">${relativeAge(n.created_at)}</span>${icon('arrow', 16, 'faint')}</li>`)}</ul>` : empty('No notifications yet.', '🔔')}</section>` }));
   });
 
   r.get('/api/notifications', (ctx) => json({ ok: true, items: unreadNotifications(app.db, user(ctx).id, 50) }));

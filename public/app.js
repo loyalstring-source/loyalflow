@@ -302,7 +302,7 @@
       var tick = function () { var m = Math.round((due - Date.now()) / 60000); el.textContent = (m < 0 ? '-' : '') + (Math.abs(m) < 60 ? Math.abs(m) + ' min' : Math.floor(Math.abs(m) / 60) + ':' + String(Math.abs(m) % 60).padStart(2, '0') + ' h'); };
       tick(); setInterval(tick, 30000);
     });
-    if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('/sw.js').catch(function () { /* optional */ });
+    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('/sw.js').catch(function () { /* optional */ });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 
@@ -340,4 +340,50 @@
   document.addEventListener('dragover', function (e) { if (!dragging) return; var col = e.target.closest && e.target.closest('[data-drop]'); document.querySelectorAll('.drop-on').forEach(function (c) { if (c !== col) c.classList.remove('drop-on'); }); if (!col || col.closest('[data-board]') !== dragging.closest('[data-board]')) return; e.preventDefault(); if (col.getAttribute('data-drop') !== dragging.getAttribute('data-col')) col.classList.add('drop-on'); });
   document.addEventListener('drop', function (e) { if (!dragging) return; var col = e.target.closest && e.target.closest('[data-drop]'); var card = dragging; if (!col) return; e.preventDefault(); col.classList.remove('drop-on'); if (col.getAttribute('data-drop') === card.getAttribute('data-col')) return; open(card.closest('[data-board]'), card, col.getAttribute('data-drop')); });
   document.addEventListener('click', function (e) { var b = e.target.closest && e.target.closest('[data-card-remark]'); if (!b) return; e.preventDefault(); e.stopPropagation(); var card = b.closest('[data-card]'); if (card) open(card.closest('[data-board]'), card, ''); });
+})();
+
+
+/* ---------- Notifications on this device (web push) ---------- */
+(function () {
+  var supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && (location.protocol === 'https:' || location.hostname === 'localhost');
+  var ios = /iPhone|iPad|iPod/.test(navigator.userAgent); var standalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  var cfg = {}; try { cfg = JSON.parse(document.getElementById('lf-config').textContent || '{}'); } catch (e) {}
+  if (!cfg.user) return;
+  function key(b64) { var pad = '='.repeat((4 - (b64.length % 4)) % 4); var raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/')); var out = new Uint8Array(raw.length); for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i); return out; }
+  function current() { return navigator.serviceWorker.ready.then(function (reg) { return reg.pushManager.getSubscription().then(function (sub) { return { reg: reg, sub: sub }; }); }); }
+  function turnOn() {
+    return Notification.requestPermission().then(function (p) {
+      if (p !== 'granted') throw new Error(p === 'denied' ? 'Notifications are blocked for LoyalFlow in this browser. Allow them in the browser\'s site settings, then try again.' : 'Notifications were not allowed.');
+      return fetch('/push/key', { credentials: 'same-origin' }).then(function (r) { return r.json(); });
+    }).then(function (k) { return current().then(function (c) { return c.sub || c.reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key(k.key) }); }); })
+      .then(function (sub) { return window.LF.post('/push/subscribe', sub.toJSON()); })
+      .then(function (res) { if (!res || !res.ok) throw new Error((res && res.error) || 'Could not save this device.'); try { localStorage.setItem('lf-push', 'on'); } catch (e) {} return res; });
+  }
+  function turnOff() { return current().then(function (c) { if (!c.sub) return; var ep = c.sub.endpoint; return c.sub.unsubscribe().then(function () { return window.LF.post('/push/unsubscribe', { endpoint: ep }); }); }).then(function () { try { localStorage.setItem('lf-push', 'off'); } catch (e) {} }); }
+  function fail(e) { window.LF.toast({ kind: 'critical', title: 'Notifications not turned on', body: e && e.message ? e.message : String(e) }); }
+
+  // The card on the Notifications page.
+  var card = document.querySelector('[data-push-card]');
+  if (card) {
+    var state = card.querySelector('[data-push-state]'), help = card.querySelector('[data-push-help]'), on = card.querySelector('[data-push-on]'), off = card.querySelector('[data-push-off]'), test = card.querySelector('[data-push-test]');
+    var paint = function () {
+      if (!supported) { state.textContent = 'Not available here'; help.textContent = ios && !standalone ? 'On an iPhone or iPad: open LoyalFlow in Safari, tap Share, choose "Add to Home Screen", then open LoyalFlow from the new icon and come back to this page.' : location.protocol !== 'https:' ? 'Notifications work on the hosted LoyalFlow address (https), not on this address.' : 'This browser does not support notifications. Use Chrome, Edge or Safari.'; return; }
+      if (Notification.permission === 'denied') { state.textContent = 'Blocked in this browser'; help.textContent = 'Notifications are blocked for LoyalFlow. Open the browser\'s site settings (the lock icon next to the address), allow notifications, and reload this page.'; return; }
+      current().then(function (c) { var isOn = !!c.sub && Notification.permission === 'granted'; state.textContent = isOn ? 'On' : 'Off'; on.hidden = isOn; off.hidden = !isOn; test.hidden = !isOn; });
+    };
+    on.addEventListener('click', function () { on.disabled = true; turnOn().then(function () { window.LF.toast({ kind: 'success', title: 'Notifications are on for this device' }); }).catch(fail).then(function () { on.disabled = false; paint(); }); });
+    off.addEventListener('click', function () { turnOff().then(function () { window.LF.toast({ kind: 'info', title: 'Notifications are off for this device' }); }).catch(fail).then(paint); });
+    paint();
+  }
+  // If the browser renewed the subscription, tell the server; and offer once to people who have not decided.
+  if (!supported) return;
+  if (Notification.permission === 'granted') { current().then(function (c) { var want = ''; try { want = localStorage.getItem('lf-push') || ''; } catch (e) {} if (c.sub && want !== 'off') window.LF.post('/push/subscribe', c.sub.toJSON()); }).catch(function () {}); return; }
+  var asked = ''; try { asked = localStorage.getItem('lf-push-asked') || ''; } catch (e) {}
+  if (card || Notification.permission !== 'default' || asked) return;
+  var bar = document.createElement('div'); bar.className = 'push-bar'; bar.setAttribute('role', 'region'); bar.setAttribute('aria-label', 'Notifications');
+  bar.innerHTML = '<span><b>Get LoyalFlow notifications on this device?</b> New tasks, approvals and payments, even when LoyalFlow is closed.</span><span class="row" style="gap:8px;flex-wrap:nowrap"><button class="btn btn-primary btn-sm" type="button" data-y>Turn on</button><button class="btn btn-sm" type="button" data-n>Not now</button></span>';
+  var done = function () { try { localStorage.setItem('lf-push-asked', '1'); } catch (e) {} bar.remove(); };
+  bar.querySelector('[data-y]').addEventListener('click', function () { turnOn().then(function () { window.LF.toast({ kind: 'success', title: 'Notifications are on for this device', body: 'Change this any time under Notifications.' }); }).catch(fail).then(done); });
+  bar.querySelector('[data-n]').addEventListener('click', done);
+  setTimeout(function () { document.body.appendChild(bar); }, 1500);
 })();

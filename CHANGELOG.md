@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.28.0 — 25 Nov 2026
+Notifications on the phone and in the browser (web push).
+- **Every LoyalFlow notification can now reach the person's phone or computer even when LoyalFlow is closed**: new tasks, approvals needed and decided, "To pay" for Accounts, payments made, advance reminders, ticket and board updates, and everything else that already appears on the bell. Tapping it opens the right page.
+- **Each person turns it on once per device.** A bar offers it the first time ("Get LoyalFlow notifications on this device?"), and Home → Notifications has an "On this device" card with Turn on, Turn off and Send a test, and lists the devices it is on for.
+- **Where it works:** Chrome and Edge on Android, Windows and Mac; Firefox; Safari on Mac. On an iPhone or iPad (iOS 16.4 or later) LoyalFlow must first be added to the Home Screen from Safari and opened from that icon. It needs the hosted https address, so it does not work on a plain http address.
+- **No outside service or cost.** Messages go through the browser makers' own push services, encrypted so that only the person's device can read them. The server keeps one key pair for this in `push.keys.json` beside the database; keep it with the data backup, otherwise people simply turn notifications on again.
+- A device that has removed LoyalFlow or withdrawn permission is forgotten automatically. Up to ten devices per person.
+- For the server: `BASE_URL` must be the public https address, so that a tapped notification opens the right page.
+
 ## 1.27.0 — 25 Nov 2026
 Accounts: limits, advance reminders, vendor bills, petty cash, GST on bills, month close and a file for Zoho Books.
 - **Spending limits per category (optional).** Accounts desk → Limits and reminders. One limit per category for a single claim. A claim above it still goes for approval, but it is marked "Above the limit" and the approver is told. No limits are set to begin with, so nothing is flagged until one is entered.

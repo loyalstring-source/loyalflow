@@ -450,3 +450,9 @@ button.path-step.done:not(:disabled):hover{background:var(--good-ink);color:#FFF
 .mn-dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px;margin:8px 0 0;font-size:13px}.mn-dl dt{color:var(--muted)}.mn-dl dd{margin:0}
 
 .mn-more{border:1px solid var(--line2);border-radius:var(--radius);padding:8px 12px}.mn-more summary{cursor:pointer;color:var(--accent);font-size:13px}
+
+/* ---------- Notifications on this device (v1.28) ---------- */
+.push-bar{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:60;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;width:min(720px,calc(100vw - 24px));padding:12px 16px;background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.18);font-size:13px}
+.push-bar>span:first-child{flex:1 1 260px;min-width:0}
+@media (max-width:700px){.push-bar{bottom:72px}}
+.push-card [hidden]{display:none!important}

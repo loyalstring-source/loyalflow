@@ -1308,5 +1308,22 @@ CREATE TABLE expense_limits (category TEXT PRIMARY KEY, per_claim REAL NOT NULL,
 CREATE TABLE ledger_months (month TEXT PRIMARY KEY, closed_at TEXT, closed_by TEXT REFERENCES employees(id), posted_at TEXT, posted_by TEXT REFERENCES employees(id));
 CREATE TABLE money_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `
+  },
+  {
+    id: '0021_push_subscriptions',
+    sql: `
+-- A browser or phone on which a person has turned notifications on.
+CREATE TABLE push_subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id TEXT NOT NULL REFERENCES employees(id),
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  last_ok_at TEXT
+);
+CREATE INDEX idx_push_subscriptions_person ON push_subscriptions(employee_id);
+`
   }
 ];
