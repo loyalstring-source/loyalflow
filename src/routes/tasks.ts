@@ -2,14 +2,18 @@ import * as lists from '../lib/lists.ts';
 import type { App } from '../app.ts';
 import { Router, htmlResponse, HttpError } from '../lib/http.ts';
 import { type Employee, listEmployees } from '../modules/people/model.ts';
-import { listTasks, getTask, createTask, decideTask, completeTask, toggleTimer, requestLeave, submitExpense, requestApproval, payloadOf } from '../modules/tasks/service.ts';
+import { listTasks, getTask, createTask, decideTask, completeTask, requestLeave, submitExpense, requestApproval, payloadOf } from '../modules/tasks/service.ts';
 import { setTarget, type KpiScope } from '../modules/kpi/engine.ts';
 import { applyRegularisationDecision, requireMissPunchComment } from '../modules/hr/attendance.ts';
 import { applyAppraisalDecision } from '../modules/hr/appraisal.ts';
 import { applyRequisitionDecision, applyOfferDecision } from '../modules/hr/recruiting.ts';
 import { can, requireCan, scopeFor } from '../lib/scope.ts';
 import { getSetting } from '../lib/settings.ts';
-import { approvalsPage, leaveModal, expenseModal, purchaseModal, tasksPage, newTaskModal, type ApprovalsData } from '../ui/pages/tasks.ts';
+import { approvalsPage, leaveModal, expenseModal, purchaseModal, type ApprovalsData } from '../ui/pages/tasks.ts';
+import { myWorkPage, teamWorkPage, newTaskModal, passModal } from '../ui/pages/work.ts';
+import { openSession, startWork, takeBreak, resumeWork, stopWork, pendingFor, dayOf, canWatch, watchable, colleagues, passTask } from '../modules/work/service.ts';
+import { localDateString } from '../lib/time.ts';
+import { listDepartments } from '../modules/people/model.ts';
 import { leaveBalance } from './today.ts';
 import { budgets, budgetFor } from '../modules/ops/service.ts';
 import { listDeals } from '../modules/sales/service.ts';
@@ -82,26 +86,34 @@ export function register(r: Router<Employee>, app: App): void {
     } catch (e) { if (e instanceof HttpError) return fail(ctx, e.status, e.message); throw e; }
   });
 
+  // ----- My work: what is pending for me, what I am on now, and my breaks -----
   r.get('/tasks', (ctx) => {
-    const v = view(ctx); const me = v.user;
-    const canAssign = can(app.db, me, 'tasks.assign');
-    const mine = listTasks(app, { assigneeId: me.id, kind: 'task', status: ['open', 'in_progress'], limit: 200 });
-    const assigned = canAssign ? listTasks(app, { kind: 'task', status: ['open', 'in_progress'], limit: 500 }).filter((t) => t.created_by === me.id && t.assignee_id !== me.id) : [];
+    const v = view(ctx); const me = v.user; const now = new Date(); const day = localDateString(now);
+    const mine = dayOf(app, [{ id: me.id, full_name: me.full_name, designation: me.designation, team: '' }], day, now)[0];
+    const assigned = listTasks(app, { kind: 'task', status: ['open', 'in_progress'], limit: 500 }).filter((t) => t.created_by === me.id && t.assignee_id !== me.id);
     const doneRows = listTasks(app, { assigneeId: me.id, kind: 'task', status: ['done'], limit: 10 });
-    return htmlResponse(tasksPage(v, { now: new Date(), mine, assigned, done: doneRows, canAssign }));
+    return htmlResponse(myWorkPage(v, { now, current: mine.current, pending: mine.pending, assigned, done: doneRows, workedMin: mine.workedMin, breakMin: mine.breakMin, breaks: mine.breaks, canWatch: canWatch(app, me) }));
   });
-  r.get('/tasks/new', (ctx) => {
-    const v = view(ctx); requireCan(app.db, v.user, 'tasks.assign');
-    const scope = scopeFor(app.db, v.user);
-    return htmlResponse(newTaskModal(v, listEmployees(app.db, { status: 'active' }).filter((e) => scope.people.has(e.id) && e.id !== v.user.id)));
+  // Team at work: the same picture for a lead's people, and for everyone when an executive looks.
+  r.get('/tasks/team', (ctx) => {
+    const v = view(ctx); const me = v.user; if (!canWatch(app, me)) return fail(ctx, 403, 'This page is for team leads and managers.');
+    const now = new Date(); const today = localDateString(now); const q = ctx.query.get('day') || ''; const day = /^\d{4}-\d{2}-\d{2}$/.test(q) && q <= today ? q : today;
+    const all = watchable(app, me); const ids = new Set(all.map((e) => e.department_id)); const departments = listDepartments(app.db).filter((d) => ids.has(d.id)).map((d) => ({ id: d.id, name: d.name }));
+    // A team lead opens on their own team; executives and administrators on everyone.
+    const asked = ctx.query.get('department'); const top = !!me.is_admin || me.functional_role === 'executive';
+    const departmentId = departments.some((d) => d.id === asked) ? asked! : asked === null && !top && departments.some((d) => d.id === me.department_id) ? me.department_id : '';
+    const order = { working: 0, break: 1, idle: 2 };
+    const people = dayOf(app, all.filter((e) => !departmentId || e.department_id === departmentId), day, now).sort((a, b) => order[a.state] - order[b.state] || b.workedMin - a.workedMin || a.name.localeCompare(b.name));
+    return htmlResponse(teamWorkPage(v, { now, day, today, people, departments, departmentId }));
   });
+  r.get('/tasks/new', (ctx) => { const v = view(ctx); return htmlResponse(newTaskModal(v, colleagues(app, v.user))); });
   r.post('/tasks', async (ctx) => {
     const me = user(ctx); const b = await ctx.body();
     const assignee = str(b, 'assigneeId') || me.id;
-    if (assignee !== me.id) { requireCan(app.db, me, 'tasks.assign'); if (!scopeFor(app.db, me).people.has(assignee)) return fail(ctx, 403, 'You can only assign tasks to people in your reporting line.'); }
-    const t = createTask(app, me, { kind: 'task', type: 'general', title: str(b, 'title'), details: str(b, 'details'), assigneeId: assignee, requesterId: me.id, dueAt: str(b, 'dueAt') ? `${str(b, 'dueAt')}T12:30:00.000Z` : null });
-    if (assignee !== me.id) app.notify.send({ employeeId: assignee, title: `New task from ${me.full_name}`, body: t.title, link: '/tasks', kind: 'info' });
-    return done(ctx, { reload: true, toast: { title: 'Task assigned', body: t.title, kind: 'success' } });
+    // Anyone may give a task to someone in their own team; managers to anyone who reports to them.
+    if (assignee !== me.id && !colleagues(app, me).some((e) => e.id === assignee)) return fail(ctx, 403, 'You can give a task to people in your own team.');
+    const t = createTask(app, me, { kind: 'task', type: 'general', title: str(b, 'title'), details: str(b, 'details'), assigneeId: assignee, requesterId: me.id, dueAt: str(b, 'dueAt') ? `${str(b, 'dueAt')}T12:30:00.000Z` : null, link: '/tasks' });
+    return done(ctx, { reload: true, toast: { title: assignee === me.id ? 'Task added' : 'Task given', body: t.title, kind: 'success' } });
   });
   r.post('/tasks/:id/complete', async (ctx) => {
     const me = user(ctx);
@@ -109,15 +121,27 @@ export function register(r: Router<Employee>, app: App): void {
     if (!t) return fail(ctx, 404, 'Task not found');
     if (t.assignee_id !== me.id && t.created_by !== me.id && !can(app.db, me, 'tasks.assign')) return fail(ctx, 403, 'Not your task');
     const r = completeTask(app, me, t.id);
-    return done(ctx, { confetti: true, toast: { title: 'Done ✓', body: r.minutes_logged ? `${r.minutes_logged} minutes logged.` : t.title, kind: 'success' } });
+    return done(ctx, { reload: true, confetti: true, toast: { title: 'Done ✓', body: r.minutes_logged ? `${r.minutes_logged} minutes logged.` : t.title, kind: 'success' } });
   });
+  r.get('/tasks/:id/pass', (ctx) => {
+    const v = view(ctx); const t = getTask(app, ctx.params.id);
+    if (!t || t.assignee_id !== v.user.id) return fail(ctx, 403, 'You can pass on only a task that is assigned to you.');
+    return htmlResponse(passModal(v, { id: t.id, title: t.title }, colleagues(app, v.user)));
+  });
+  r.post('/tasks/:id/pass', async (ctx) => {
+    const me = user(ctx); const b = await ctx.body(); const out = passTask(app, me, ctx.params.id, str(b, 'to'), str(b, 'note'));
+    return done(ctx, { reload: true, toast: { title: `Passed to ${out.to}`, body: out.title, kind: 'success' } });
+  });
+  // The older start/stop button on a task.
   r.post('/tasks/:id/timer', async (ctx) => {
-    const me = user(ctx);
-    const t = getTask(app, ctx.params.id);
-    if (!t || t.assignee_id !== me.id) return fail(ctx, 403, 'Not your task');
-    const r = toggleTimer(app, me, t.id);
-    return done(ctx, { reload: true, toast: { title: r.timer_started_at ? 'Timer running' : `Timer stopped: ${r.minutes_logged} min logged`, kind: 'info' } });
+    const me = user(ctx); const cur = openSession(app, me.id);
+    if (cur && cur.entity_type === 'task' && cur.entity_id === ctx.params.id) { stopWork(app, me); return done(ctx, { reload: true, toast: { title: 'Stopped', kind: 'info' } }); }
+    startWork(app, me, 'task', ctx.params.id); return done(ctx, { reload: true, toast: { title: 'Started', kind: 'info' } });
   });
+  r.post('/work/start', async (ctx) => { const me = user(ctx); const b = await ctx.body(); const s = startWork(app, me, str(b, 'type'), str(b, 'id')); return done(ctx, { reload: true, toast: { title: 'Started', body: s.title, kind: 'success' } }); });
+  r.post('/work/break', async (ctx) => { const me = user(ctx); const b = await ctx.body(); const s = takeBreak(app, me, str(b, 'reason')); return done(ctx, { reload: true, toast: { title: `Break started${s.note && s.note !== 'Break' ? `: ${s.note}` : ''}`, body: 'Press "Back to work" when you return.', kind: 'info' } }); });
+  r.post('/work/resume', async (ctx) => { const s = resumeWork(app, user(ctx)); return done(ctx, { reload: true, toast: { title: 'Back to work', body: s.title, kind: 'success' } }); });
+  r.post('/work/stop', async (ctx) => { const s = stopWork(app, user(ctx)); return done(ctx, { reload: true, toast: { title: s ? `Stopped: ${s.minutes} min` : 'Nothing was running', kind: 'info' } }); });
 
   r.get('/api/approvals', (ctx) => { const me = user(ctx); return htmlResponse(JSON.stringify({ ok: true, items: listTasks(app, { assigneeId: me.id, kind: 'approval', status: ['open'] }) }), 200, { 'content-type': 'application/json; charset=utf-8' }); });
   void getSetting;

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.23.0 — 25 Nov 2026
+Work in hand: pending work, a running timer, breaks, and a live view for leads.
+- **Tasks is now "My work".** One list of everything waiting for a person: tasks given to them, today's daily-review lines, tickets assigned to them and development board items. Each shows who gave it, when it is due and the time already worked.
+- **Start, and the timer runs.** Pressing Start on an item shows "Working since …" with a running clock. A person works on one item at a time: starting another stops the first.
+- **Breaks.** "Take a break" (Lunch, Tea, Personal, Meeting, Other) pauses the work and times the break; "Back to work" resumes the same item. The page shows hours worked and break time for the day.
+- **Team at work** (button on My work, or `/tasks/team`). Team leads see their people; the COO, CEO and administrators see everyone, with a team filter. For each person: working, on a break or not on a task; what they are on and since when; hours worked; breaks; first start; pending items and how many are overdue. Opening a person shows the day session by session and their pending list. It refreshes every minute, and earlier days can be opened.
+- **Anyone can give or pass on a task.** "New task" can be for yourself or anyone in your own team (managers: anyone who reports to them). "Pass on" hands one of your tasks to a team-mate with a reason; they are notified, and so is the person who gave it to you.
+- A timer left running is counted for at most 10 hours and a break for at most 3. Finishing or passing on a task stops its timer.
+- The report "What each person did" gains hours timed on tasks and break hours, and lists each work session and break for one person.
+
 ## 1.22.0 — 25 Nov 2026
 New sign-in page.
 - **The sign-in page follows the new design:** a company bar with the Loyal String logo, "LoyalFlow" and "Workforce Management"; "Sign in to LoyalFlow" on the left; "The future of work flows together." with Vision 2030 and the flowing ribbons on the right; "Loyal String International" at the foot. The reset-password pages use the same frame.

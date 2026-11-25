@@ -1,4 +1,5 @@
 import type { App } from '../../app.ts';
+import { stopItem, startWork, stopWork, openSession } from '../work/service.ts';
 import { audit } from '../../lib/audit.ts';
 import { HttpError } from '../../lib/http.ts';
 import { getSetting, type ApprovalRule } from '../../lib/settings.ts';
@@ -125,27 +126,20 @@ export function decideTask(app: App, actor: Employee, id: string, decision: 'app
 }
 
 export function completeTask(app: App, actor: Employee, id: string): Task {
-  const t = getTask(app, id);
-  if (!t) throw new HttpError(404, 'Task not found');
-  const nowIso = new Date().toISOString();
-  const extra = t.timer_started_at ? Math.round((Date.now() - new Date(t.timer_started_at).getTime()) / 60_000) : 0;
-  app.db.run("UPDATE tasks SET status = 'done', decided_at = ?, decided_by = ?, minutes_logged = minutes_logged + ?, timer_started_at = NULL, updated_at = ? WHERE id = ?", [nowIso, actor.id, extra, nowIso, id]);
-  audit(app.db, { entity: 'task', entityId: id, action: 'done', actorId: actor.id, after: { minutes: t.minutes_logged + extra } });
-  if (t.created_by && t.created_by !== actor.id) app.notify.send({ employeeId: t.created_by, title: `Done: ${t.title}`, body: `${actor.full_name} logged ${t.minutes_logged + extra} minutes`, link: `/approvals#${id}`, kind: 'success' });
+  if (!getTask(app, id)) throw new HttpError(404, 'Task not found');
+  stopItem(app, 'task', id);   // whoever is timing it stops, and that time is added
+  const t = getTask(app, id)!; const nowIso = new Date().toISOString();
+  app.db.run("UPDATE tasks SET status = 'done', decided_at = ?, decided_by = ?, timer_started_at = NULL, updated_at = ? WHERE id = ?", [nowIso, actor.id, nowIso, id]);
+  audit(app.db, { entity: 'task', entityId: id, action: 'done', actorId: actor.id, after: { minutes: t.minutes_logged } });
+  if (t.created_by && t.created_by !== actor.id) app.notify.send({ employeeId: t.created_by, title: `Done: ${t.title}`, body: `${actor.full_name} logged ${t.minutes_logged} minutes`, link: '/tasks', kind: 'success' });
   return getTask(app, id)!;
 }
 
-/** Time tracking for executive-assigned work (decision I1): start/stop a timer on the task. */
+/** Start or stop work on a task (kept for callers that toggle; the work module does the recording). */
 export function toggleTimer(app: App, actor: Employee, id: string): Task {
-  const t = getTask(app, id);
-  if (!t) throw new HttpError(404, 'Task not found');
-  const nowIso = new Date().toISOString();
-  if (t.timer_started_at) {
-    const extra = Math.round((Date.now() - new Date(t.timer_started_at).getTime()) / 60_000);
-    app.db.run('UPDATE tasks SET minutes_logged = minutes_logged + ?, timer_started_at = NULL, updated_at = ? WHERE id = ?', [extra, nowIso, id]);
-  } else {
-    app.db.run("UPDATE tasks SET timer_started_at = ?, status = CASE WHEN status = 'open' THEN 'in_progress' ELSE status END, updated_at = ? WHERE id = ?", [nowIso, nowIso, id]);
-  }
+  if (!getTask(app, id)) throw new HttpError(404, 'Task not found');
+  const cur = openSession(app, actor.id);
+  if (cur && cur.entity_type === 'task' && cur.entity_id === id) stopWork(app, actor); else startWork(app, actor, 'task', id);
   return getTask(app, id)!;
 }
 

@@ -54,26 +54,4 @@ export function purchaseModal(v: View): Raw {
     <div class="row" style="justify-content:flex-end"><button class="btn btn-primary" type="submit">Send request</button></div></form>` });
 }
 
-export interface TasksData { now: Date; mine: Task[]; assigned: Task[]; done: Task[]; canAssign: boolean }
-
-export function tasksPage(v: View, d: TasksData): Raw {
-  const row = (t: Task, own: boolean) => { const overdue = t.due_at && t.due_at < d.now.toISOString() && !['done', 'cancelled'].includes(t.status); return html`<li id="${t.id}">
-    ${own ? html`<input type="checkbox" data-post="/tasks/${t.id}/complete" data-remove-on-success="li" aria-label="Complete" style="width:20px;height:20px;accent-color:var(--good)">` : avatar(t.assignee_name, t.assignee_id || '')}
-    <span style="flex:1;min-width:0"><b style="display:block;font-size:13px">${t.title}</b><span class="small ${overdue ? 'c-crit' : 'muted'}">${t.type.replace('_', ' ')}${when(!own, () => html` · ${t.assignee_name || 'Unassigned'}`)}${when(t.requester_name && t.requester_id !== v.user.id, () => html` · from ${t.requester_name}`)}${when(t.due_at, () => html` · ${overdue ? 'Overdue, was due' : 'Due'} ${fmtDate(t.due_at)}`)}${when(t.minutes_logged || t.timer_started_at, () => html` · ${fmtDuration(t.minutes_logged)} logged`)}${when(t.details, () => html`<br>${t.details}`)}</span></span>
-    ${when(t.link, () => html`<a class="btn btn-sm btn-ghost" href="${t.link}">Open</a>`)}
-    ${when(own && !['done', 'cancelled'].includes(t.status), () => html`<button class="btn btn-sm ${t.timer_started_at ? 'btn-dark' : ''}" data-post="/tasks/${t.id}/timer">${icon('clock', 14)} ${t.timer_started_at ? 'Stop timer' : 'Start timer'}</button>`)}
-    ${when(t.status === 'done', pill(`Done ${fmtDate(t.decided_at)}`, 'good'))}</li>`; };
-  return page(v, { title: 'Tasks', subtitle: 'Work handed to you, with a timer for executive-assigned tasks.', actions: when(d.canAssign, button('Assign a task', { modal: '/tasks/new', kind: 'primary', icon: 'plus' })),
-    body: html`<section class="card"><h2>My open tasks</h2>${d.mine.length ? html`<ul class="list">${d.mine.map((t) => row(t, true))}</ul>` : empty('No open tasks. 🎉')}</section>
-      ${when(d.canAssign, () => html`<section class="card"><h2>Tasks I assigned</h2>${d.assigned.length ? html`<ul class="list">${d.assigned.map((t) => row(t, false))}</ul>` : empty('You have not assigned any tasks.')}</section>`)}
-      ${when(d.done.length, () => html`<section class="card"><h2>Recently done</h2><ul class="list">${d.done.map((t) => row(t, false))}</ul></section>`)}` });
-}
-
-export function newTaskModal(v: View, people: Employee[]): Raw {
-  return modal({ title: 'Assign a task', body: html`<form class="form" data-ajax action="/tasks">
-    ${field('Task', input('title', { required: true }))}${field('Details', textarea('details', { rows: 2 }))}
-    <div class="grid grid-2">${field('Assign to', select('assigneeId', people.map((p) => ({ value: p.id, label: `${p.full_name} · ${p.designation}` })), { blank: 'Me' }))}${field('Due', input('dueAt', { type: 'date' }))}</div>
-    <div class="row between"><span class="small muted">The person is notified and the task appears on their Today page.</span><button class="btn btn-primary" type="submit">Assign</button></div></form>` });
-}
-
 export { fmtDateTime };

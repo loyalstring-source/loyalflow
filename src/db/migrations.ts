@@ -1217,5 +1217,25 @@ ALTER TABLE estimates ADD COLUMN place_of_supply TEXT NOT NULL DEFAULT '';
 ALTER TABLE dsr_items ADD COLUMN slot_from TEXT NOT NULL DEFAULT '';
 ALTER TABLE dsr_items ADD COLUMN slot_to TEXT NOT NULL DEFAULT '';
 `
+  },
+  {
+    id: '0017_work_sessions',
+    sql: `
+-- What a person is working on, and their breaks: one line each time they start, pause or stop.
+CREATE TABLE work_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id TEXT NOT NULL REFERENCES employees(id),
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT 'work',
+  note TEXT NOT NULL DEFAULT '',
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  minutes INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_work_sessions_person ON work_sessions(employee_id, started_at);
+CREATE INDEX idx_work_sessions_item ON work_sessions(entity_type, entity_id);
+`
   }
 ];

@@ -416,3 +416,18 @@ button.path-step.done:not(:disabled):hover{background:var(--good-ink);color:#FFF
 @media (max-width:900px){.si-top{padding:12px 18px;gap:12px;flex-wrap:wrap}.si-top .si-div-s,.si-top .si-prod:last-child{display:none}.si-brand img:first-child{width:44px;height:auto}.si-brand img:last-child{width:120px;height:auto}.si-prod{font-size:16px}
   .si-main{padding:28px 18px 180px;gap:28px}.si-form{flex-basis:100%}.si-hero{flex-basis:100%}.si-h{font-size:30px}.si-sub,.si-lead{font-size:17px}.si-vision{font-size:16px;margin-top:18px}.si-box h1{font-size:30px}.si-waves{width:140%;height:240px}.si-foot{padding:12px 18px;font-size:14px}
   .si-input,.si .form .input{min-height:52px;font-size:17px}.si-btn{min-height:56px;font-size:19px}.si-field,.si-row,.si-help{font-size:16px}}
+
+/* ---------- My work and Team at work (v1.23) ---------- */
+.wk-now{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px 20px;padding:14px 16px;border-left:4px solid var(--line)}
+.wk-now-on{border-left-color:var(--good);background:var(--good-soft)}.wk-now-break{border-left-color:var(--warn);background:var(--warn-soft)}
+.wk-now-main{display:flex;align-items:center;gap:12px;min-width:0;flex:1 1 320px}.wk-now-main b{font-size:15px}
+.wk-now-side{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.wk-now>.small{flex-basis:100%}
+.wk-dot{width:12px;height:12px;border-radius:50%;flex:none}.wk-on{background:var(--good);box-shadow:0 0 0 4px rgba(46,107,74,.2)}.wk-break{background:var(--warn);box-shadow:0 0 0 4px rgba(138,90,0,.2)}.wk-idle{background:var(--faint)}
+.wk-clock{font-size:20px;min-width:86px;text-align:right}
+.wk-team .wk-clock,.wk-line .wk-clock{font-size:inherit;min-width:0}
+.wk-break{display:inline-flex;gap:6px;align-items:center}.wk-break .input{min-height:32px;width:auto;padding:2px 8px}
+.list li.wk-row-on{background:var(--good-soft)}
+.wk-team td{vertical-align:top}.wk-detail td{padding-top:0;border-top:0}.wk-detail summary{cursor:pointer;color:var(--accent);font-size:12px}
+.wk-cols{display:flex;flex-wrap:wrap;gap:12px 32px;padding:8px 0 4px}.wk-cols>div{flex:1 1 360px;min-width:0}
+.wk-line{list-style:none;margin:6px 0 0;padding:0}.wk-line li{display:flex;gap:10px;align-items:baseline;padding:5px 0;border-top:1px solid var(--line2);font-size:12px}.wk-line li>span:nth-child(2){flex:1;min-width:0}.wk-line li>span:first-child{flex:0 0 auto;min-width:112px}
