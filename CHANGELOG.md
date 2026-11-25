@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.29.0 — 25 Nov 2026
+A new app menu (the grid button beside the section name).
+- **It scrolls.** The menu was cut off on smaller screens, so Company and Settings could not be reached. It now fits the window and scrolls inside.
+- **Coloured cards with an icon on every page.** Each module is a card in its own colour; each page has its own icon; numbers show what is waiting (approvals, notifications).
+- **Drag to rearrange.** Drag a card by the handle at its top right to put the modules in your own order. On a phone or tablet, use the up and down arrows on each card. "Reset order" puts it back.
+- **Pin pages.** Press the star beside any page to keep it in a row at the top. Up to twelve.
+- **Find a page.** Type part of a name, for example "pay"; Enter opens the first match.
+- Each person's order and pins are saved for them and follow them to any device. Esc or a click outside closes the menu.
+
 ## 1.28.0 — 25 Nov 2026
 Notifications on the phone and in the browser (web push).
 - **Every LoyalFlow notification can now reach the person's phone or computer even when LoyalFlow is closed**: new tasks, approvals needed and decided, "To pay" for Accounts, payments made, advance reminders, ticket and board updates, and everything else that already appears on the bell. Tapping it opens the right page.

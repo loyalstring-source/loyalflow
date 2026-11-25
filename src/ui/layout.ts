@@ -78,7 +78,7 @@ const HEAD = (title: string) => html`<meta charset="utf-8"><meta name="viewport"
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="/static/theme.css?v=${ASSET_V}">`;
 
-export const ASSET_V = '32';
+export const ASSET_V = '34';
 
 /** The modules of the app, each with its own tabs. A person sees a module when their role lets them into at least one of its tabs. */
 interface ModuleDef { key: string; name: string; icon: string; tone: string; tabs: string[] }
@@ -115,6 +115,11 @@ export function modulesFor(v: View): ModuleNav[] {
   const rename: Record<string, string> = { today: companyLevel ? 'My day' : 'Today', pipeline: 'Deals', desk: 'Tickets', dev: 'Board', production: 'Work orders', people: 'Directory', company: 'Dashboard', settings: 'General' };
   return MODULES.map((m) => ({ key: m.key, name: m.name, icon: m.icon, tone: m.tone, tabs: m.tabs.map((k) => byKey.get(k)).filter((x): x is NavItem => !!x).map((t) => ({ ...t, label: rename[t.key] || t.label })) })).filter((m) => m.tabs.length);
 }
+/** The order of the menu cards and the pinned pages, as the person left them. */
+export function menuPrefs(v: View): { order: string[]; pins: string[] } {
+  try { const row = v.app.db.get<{ value: string }>("SELECT value FROM user_prefs WHERE employee_id = ? AND key = 'menu'", [v.user.id]); const p = row ? JSON.parse(row.value) as { order?: unknown; pins?: unknown } : {};
+    const list = (x: unknown): string[] => (Array.isArray(x) ? x.filter((s): s is string => typeof s === 'string').slice(0, 40) : []); return { order: list(p.order), pins: list(p.pins) }; } catch { return { order: [], pins: [] }; }
+}
 /** Which tab a page belongs to. */
 export function tabKey(path: string): string {
   const seg = path.split('/')[1] || '';
@@ -128,6 +133,10 @@ export function page(v: View, o: PageOpts): Raw {
   const modules = modulesFor(v);
   const current = modules.find((m) => m.tabs.some((t) => t.key === tab)) || modules.find((m) => m.tabs.some((t) => t.key === active)) || null;
   const mobile = nav.filter((n) => n.mobile).slice(0, 5);
+  // Each person's own order for the menu cards, and the pages they pinned.
+  const pref = menuPrefs(v); const pins = pref.pins;
+  const ordered = [...modules].sort((a, b) => { const i = pref.order.indexOf(a.key), j = pref.order.indexOf(b.key); return (i < 0 ? 999 : i) - (j < 0 ? 999 : j); });
+  const pinned = pins.map((k) => { for (const m of modules) { const t = m.tabs.find((x) => x.key === k); if (t) return { ...t, tone: m.tone }; } return null; }).filter((x): x is NavItem & { tone: string } => !!x);
   const cfg = { user: { id: v.user.id, name: v.user.full_name, lang: v.lang, dept: v.deptCode }, csrf: v.csrf };
   return html`<!doctype html><html lang="${v.lang}"><head>${HEAD(`${o.docTitle || o.title} · LoyalFlow`)}${o.headExtra}</head>
 <body data-path="${v.path}"${when(o.autoRefresh, () => html` data-autorefresh="${o.autoRefresh}"`)}>
@@ -143,9 +152,16 @@ export function page(v: View, o: PageOpts): Raw {
     </div>
     <nav class="shellbar-nav" aria-label="Main">
       <details class="launcher">
-        <summary aria-label="All modules" title="All modules">${icon('grid', 20)}</summary>
-        <div class="launcher-menu">${modules.map((m) => html`<div class="launcher-group"><a class="launcher-head" href="${m.tabs[0].href}"><span class="sq sq-${m.tone}">${icon(m.icon, 18)}</span><b>${m.name}</b></a>
-          <div class="launcher-links">${m.tabs.map((t) => html`<a href="${t.href}">${t.label}</a>`)}</div></div>`)}</div>
+        <summary aria-label="All pages" title="All pages">${icon('grid', 20)}</summary>
+        <div class="launcher-menu" role="dialog" aria-label="All pages" data-launcher>
+          <div class="lm-top"><label class="lm-search">${icon('search', 16)}<input type="search" placeholder="Find a page, for example Payroll" aria-label="Find a page" data-lm-search autocomplete="off"></label>
+            <span class="lm-hint small muted">${icon('grip', 14)} Drag a card by its handle to rearrange. Your order is remembered.</span><button class="btn btn-sm" type="button" data-lm-reset>Reset order</button><button class="btn btn-ghost btn-sm" type="button" data-lm-close aria-label="Close">${icon('x', 16)}</button></div>
+          <div class="lm-pins" data-lm-pins><span class="small muted lm-pins-label">${icon('star', 14)} Pinned</span>${pinned.map((t) => html`<a class="lm-pin" href="${t.href}" data-pin="${t.key}"><span class="lm-ico sq-${t.tone}">${icon(t.icon, 13)}</span>${t.label}</a>`)}<span class="small muted" data-lm-pinhint ${when(pinned.length, 'hidden')}>Press the star beside any page to keep it here.</span></div>
+          <div class="lm-grid" data-lm-grid>${ordered.map((m) => html`<section class="lm-card" data-mod="${m.key}">
+            <div class="lm-head lm-${m.tone}"><a class="lm-title" href="${m.tabs[0].href}"><span class="sq sq-${m.tone}">${icon(m.icon, 18)}</span><b>${m.name}</b></a><span class="lm-move"><button type="button" data-lm-up aria-label="Move ${m.name} earlier" title="Move earlier">${icon('arrow', 14)}</button><button type="button" data-lm-down aria-label="Move ${m.name} later" title="Move later">${icon('arrow', 14)}</button></span><span class="lm-grip" draggable="true" title="Drag to move" aria-hidden="true">${icon('grip', 18)}</span></div>
+            <div class="lm-links">${m.tabs.map((t) => html`<div class="lm-row" data-key="${t.key}" data-label="${t.label} ${m.name}"><a class="lm-link ${t.key === tab ? 'on' : ''}" href="${t.href}"><span class="lm-ico lm-${m.tone}">${icon(t.icon, 15)}</span><span class="lm-label">${t.label}</span>${when(t.badge, () => html`<span class="lm-count">${t.badge}</span>`)}</a><button class="lm-star ${pins.includes(t.key) ? 'on' : ''}" type="button" data-lm-star data-tone="${m.tone}" data-icon-html aria-pressed="${pins.includes(t.key) ? 'true' : 'false'}" aria-label="Pin ${t.label}" title="Pin to the top">${icon('star', 14)}</button></div>`)}</div></section>`)}</div>
+          <p class="small muted lm-none" data-lm-none hidden>No page matches that.</p>
+        </div>
       </details>
       <span class="shellbar-module">${current ? current.name : 'Loyal Flow'}</span>
       <div class="shellbar-tabs">${(current ? current.tabs : []).map((t) => html`<a href="${t.href}" class="${t.key === tab || (t.key === active && !current!.tabs.some((x) => x.key === tab)) ? 'active' : ''}">${t.label}${when(t.badge, () => html`<span class="badge">${t.badge}</span>`)}</a>`)}</div>

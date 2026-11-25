@@ -122,6 +122,13 @@ export function register(r: Router<Employee>, app: App): void {
   r.post('/attendance/check-in', async (ctx) => attendance(ctx, app, 'in'));
   r.post('/attendance/check-out', async (ctx) => attendance(ctx, app, 'out'));
 
+  // The person's own order for the app menu and their pinned pages.
+  r.post('/me/menu', async (ctx) => {
+    const me = user(ctx); const b = await ctx.body(); const list = (x: unknown): string[] => (Array.isArray(x) ? x.filter((s): s is string => typeof s === 'string' && /^[\w:.-]{1,40}$/.test(s)).slice(0, 40) : []);
+    const value = JSON.stringify({ order: list(b.order), pins: [...new Set(list(b.pins))].slice(0, 12) });
+    app.db.run("INSERT INTO user_prefs (employee_id, key, value, updated_at) VALUES (?, 'menu', ?, ?) ON CONFLICT(employee_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at", [me.id, value, new Date().toISOString()]);
+    return done(ctx, {});
+  });
   r.post('/me/lang', async (ctx) => {
     const body = await ctx.body();
     const lang = str(body, 'lang') === 'hi' ? 'hi' : 'en';

@@ -1325,5 +1325,18 @@ CREATE TABLE push_subscriptions (
 );
 CREATE INDEX idx_push_subscriptions_person ON push_subscriptions(employee_id);
 `
+  },
+  {
+    id: '0022_user_prefs',
+    sql: `
+-- Small personal settings, such as the order of the app menu and the pages a person pinned.
+CREATE TABLE user_prefs (
+  employee_id TEXT NOT NULL REFERENCES employees(id),
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (employee_id, key)
+);
+`
   }
 ];

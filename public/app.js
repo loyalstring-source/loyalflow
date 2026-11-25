@@ -387,3 +387,59 @@
   bar.querySelector('[data-n]').addEventListener('click', done);
   setTimeout(function () { document.body.appendChild(bar); }, 1500);
 })();
+
+
+/* ---------- App menu: find a page, pin it, and drag the cards into your own order ---------- */
+(function () {
+  var box = document.querySelector('[data-launcher]'); if (!box) return;
+  var details = box.closest('details'), grid = box.querySelector('[data-lm-grid]'), pinsEl = box.querySelector('[data-lm-pins]'), search = box.querySelector('[data-lm-search]'), none = box.querySelector('[data-lm-none]');
+  var initial = [].map.call(grid.querySelectorAll('.lm-card'), function (c) { return c.getAttribute('data-mod'); }).sort();
+  function cards() { return [].slice.call(grid.querySelectorAll('.lm-card')); }
+  function pins() { return [].map.call(pinsEl.querySelectorAll('.lm-pin'), function (a) { return a.getAttribute('data-pin'); }); }
+  var timer = null;
+  function save() { clearTimeout(timer); timer = setTimeout(function () { window.LF.post('/me/menu', { order: cards().map(function (c) { return c.getAttribute('data-mod'); }), pins: pins() }); }, 300); }
+  function close() { details.removeAttribute('open'); }
+  details.addEventListener('toggle', function () { if (details.open) { search.value = ''; filter(); setTimeout(function () { if (window.matchMedia('(pointer:fine)').matches) search.focus(); }, 30); } });
+  document.addEventListener('click', function (e) { if (details.open && !details.contains(e.target)) close(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && details.open) { close(); details.querySelector('summary').focus(); } });
+  box.querySelector('[data-lm-close]').addEventListener('click', close);
+
+  // Find a page by name.
+  function filter() {
+    var q = search.value.trim().toLowerCase(), any = false;
+    cards().forEach(function (c) { var shown = 0; c.querySelectorAll('.lm-row').forEach(function (r) { var hit = !q || r.getAttribute('data-label').toLowerCase().indexOf(q) >= 0; r.hidden = !hit; if (hit) shown++; }); c.hidden = !shown; if (shown) any = true; });
+    none.hidden = any;
+  }
+  search.addEventListener('input', filter);
+  search.addEventListener('keydown', function (e) { if (e.key !== 'Enter') return; var first = grid.querySelector('.lm-card:not([hidden]) .lm-row:not([hidden]) .lm-link'); if (first) { e.preventDefault(); window.location.href = first.getAttribute('href'); } });
+
+  // Pin and unpin.
+  function hint() { var h = pinsEl.querySelector('[data-lm-pinhint]'); if (h) h.hidden = pins().length > 0; }
+  box.addEventListener('click', function (e) {
+    var star = e.target.closest('[data-lm-star]'); if (!star) return; e.preventDefault();
+    var row = star.closest('.lm-row'), key = row.getAttribute('data-key'), link = row.querySelector('.lm-link'), on = !star.classList.contains('on');
+    if (on && pins().length >= 12) { window.LF.toast({ kind: 'info', title: 'Twelve pages can be pinned', body: 'Unpin one first.' }); return; }
+    star.classList.toggle('on', on); star.setAttribute('aria-pressed', on ? 'true' : 'false');
+    var cur = pinsEl.querySelector('.lm-pin[data-pin="' + key + '"]');
+    if (on && !cur) { var a = document.createElement('a'); a.className = 'lm-pin'; a.href = link.getAttribute('href'); a.setAttribute('data-pin', key); var ico = link.querySelector('.lm-ico').cloneNode(true); ico.className = 'lm-ico sq-' + star.getAttribute('data-tone'); var svg = ico.querySelector('svg'); if (svg) { svg.setAttribute('width', '13'); svg.setAttribute('height', '13'); } a.appendChild(ico); a.appendChild(document.createTextNode(link.querySelector('.lm-label').textContent)); pinsEl.insertBefore(a, pinsEl.querySelector('[data-lm-pinhint]')); }
+    if (!on && cur) cur.remove();
+    hint(); save();
+  });
+
+  // Rearrange: drag a card by its handle, or use the arrows on a touch screen.
+  var dragging = null;
+  grid.addEventListener('dragstart', function (e) { var g = e.target.closest && e.target.closest('.lm-grip'); if (!g) return; dragging = g.closest('.lm-card'); try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragging.getAttribute('data-mod')); e.dataTransfer.setDragImage(dragging, 30, 20); } catch (x) {} setTimeout(function () { if (dragging) dragging.classList.add('is-dragging'); }, 0); });
+  grid.addEventListener('dragover', function (e) {
+    if (!dragging) return; e.preventDefault(); var over = e.target.closest && e.target.closest('.lm-card'); if (!over || over === dragging) return;
+    var r = over.getBoundingClientRect(); var after = e.clientY > r.top + r.height / 2;
+    if (after) { if (over.nextSibling !== dragging) grid.insertBefore(dragging, over.nextSibling); } else if (over.previousSibling !== dragging) grid.insertBefore(dragging, over);
+  });
+  grid.addEventListener('drop', function (e) { if (dragging) e.preventDefault(); });
+  grid.addEventListener('dragend', function () { if (!dragging) return; dragging.classList.remove('is-dragging'); dragging = null; save(); });
+  grid.addEventListener('click', function (e) {
+    var up = e.target.closest('[data-lm-up]'), down = e.target.closest('[data-lm-down]'); if (!up && !down) return; e.preventDefault(); var card = (up || down).closest('.lm-card');
+    if (up && card.previousElementSibling) grid.insertBefore(card, card.previousElementSibling); if (down && card.nextElementSibling) grid.insertBefore(card.nextElementSibling, card);
+    save();
+  });
+  box.querySelector('[data-lm-reset]').addEventListener('click', function () { window.LF.post('/me/menu', { order: [], pins: pins() }).then(function () { window.location.reload(); }); });
+})();

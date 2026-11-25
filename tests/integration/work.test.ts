@@ -103,3 +103,18 @@ describe('boards: drag a tile, or remark on it', () => {
     assert.equal(COO, 'sridhar.ngowda@loyalstring.com'); assert.equal(emp(s.app, COO).id, 'LS002');
   });
 });
+
+describe('the app menu', () => {
+  let s: TestServer; before(async () => { s = await startServer(); }); after(async () => { await s.close(); });
+  test('every page has an icon and a pin; a person\'s order and pins are kept for them alone', async () => {
+    const coo = new Client(s.base); await coo.login(COO); const bdm = new Client(s.base); await bdm.login(BDM);
+    const order = (h: string): string[] => [...h.matchAll(/class="lm-card" data-mod="([\w:]+)"/g)].map((m) => m[1]);
+    let page = await (await coo.get('/my-day')).text(); assert.match(page, /data-launcher/); assert.match(page, /data-lm-search/); assert.match(page, /class="lm-grip" draggable="true"/); assert.match(page, /data-lm-star/);
+    assert.deepEqual(order(page).slice(0, 2), ['home', 'sales']); assert.ok(order(page).includes('admin'));
+    assert.equal((await coo.postJson('/me/menu', { order: ['people', 'company', 'home'], pins: ['hire', 'desk', 'hire', '<bad>'] })).status, 200);
+    page = await (await coo.get('/my-day')).text(); assert.deepEqual(order(page).slice(0, 3), ['people', 'company', 'home']); assert.ok(order(page).includes('sales'), 'cards not named keep their place after the named ones');
+    assert.match(page, /class="lm-pin" href="\/hire" data-pin="hire"/); assert.match(page, /data-pin="desk"/); assert.equal((page.match(/class="lm-pin"/g) || []).length, 2);
+    assert.deepEqual(order(await (await bdm.get('/')).text()).slice(0, 2), ['home', 'sales'], 'another person is not affected');
+    await coo.postJson('/me/menu', { order: [], pins: [] }); assert.deepEqual(order(await (await coo.get('/my-day')).text()).slice(0, 2), ['home', 'sales']);
+  });
+});
