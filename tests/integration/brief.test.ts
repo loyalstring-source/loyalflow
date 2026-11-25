@@ -125,3 +125,14 @@ describe('over HTTP', () => {
     assert.equal((await ic.get('/roles')).status, 200); assert.equal((await ic.get('/settings')).status, 200);
   });
 });
+
+describe('reports seen from above', () => {
+  test('people who lead a team open on the floor; the list is one click away; others keep the list', async () => {
+    const coo = await login(COO); const top = await (await coo.get('/reports')).text();
+    assert.match(top, /class="floor"/); assert.match(top, /href="#team-SAL"/); assert.match(top, /id="team-SAL"/); assert.match(top, /class="bars3d"/); assert.match(top, /Show as a list/);
+    const list = await (await coo.get('/reports?view=list')).text(); assert.ok(!list.includes('class="floor"')); assert.match(list, /report-grid/); assert.match(list, /View from above/);
+    const sales = await (await coo.get('/reports?module=sales')).text(); assert.ok(!sales.includes('class="floor"'), 'the reports of one module stay a list');
+    const karan = await (await (await login(KARAN)).get('/reports')).text(); assert.match(karan, /class="floor"/); assert.ok(!karan.includes('id="team-SAL"'), 'a manager sees only the teams he leads');
+    const ic = await (await (await login(BDM)).get('/reports')).text(); assert.ok(!ic.includes('class="floor"'));
+  });
+});

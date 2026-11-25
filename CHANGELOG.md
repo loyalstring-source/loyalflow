@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.20.0 — 25 Nov 2026
+Reports seen from above, in 3D.
+- **Reports opens on a view of the company from above** for executives, administrators and anyone who leads a team. Each team is a group of blocks on the floor with a pulsing marker over it. The marker is green, amber or red for the team's outlook this month, and the number on it is how many items need attention. Each block is one of the last four weeks against target.
+- **Click a marker and a panel opens at the side** with the team's figures against target, a three-dimensional bar chart, what needs attention, and the team's reports. Every bar carries its figure. Esc or the cross closes the panel.
+- Before anything is clicked, the side shows "Where to look first": teams in order, worst first.
+- **"Show as a list"** opens the plain list of all reports as before; "View from above" comes back. Reports opened from a module's own menu stay a list. Managers see only the teams they lead. Everyone else keeps the list.
+- Works on a phone (the panel opens under the floor) and from the keyboard.
+
 ## 1.19.3 — 25 Nov 2026
 - **Estimates carry the new monochrome Loyal String logo** in place of the red and blue one. The LoyalFlow logo elsewhere is unchanged.
 

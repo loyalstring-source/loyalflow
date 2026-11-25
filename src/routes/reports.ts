@@ -7,6 +7,8 @@ import { buildXlsx, type Sheet } from '../lib/xlsx.ts';
 import { localDateString } from '../lib/time.ts';
 import { reportsFor, getReport, runReport, defaultRange, MENU_OF, type Column, type Cell } from '../modules/reports/engine.ts';
 import { reportsHubPage, reportPage } from '../ui/pages/reports.ts';
+import { reportsFloorPage } from '../ui/pages/reports-floor.ts';
+import { buildBrief, teamsUserSees } from '../modules/brief/service.ts';
 import { fail, view } from './helpers.ts';
 
 function quickRanges(now = new Date()): { label: string; from: string; to: string }[] {
@@ -23,7 +25,10 @@ export function register(r: Router<Employee>, app: App): void {
   r.get('/reports', (ctx) => {
     const v = view(ctx); const menu = ctx.query.get('module') || '';
     const all = reportsFor(app, v.user); const shown = menu ? all.filter((x) => MENU_OF[x.module] === menu) : all;
-    return htmlResponse(reportsHubPage(v, { reports: shown, menu }));
+    // People who lead a team open on the view from above; the plain list is one click away.
+    const canFloor = teamsUserSees(app, v.user).length > 0;
+    if (canFloor && !menu && ctx.query.get('view') !== 'list') { const brief = buildBrief(app, v.user); if (brief.rows.length) return htmlResponse(reportsFloorPage(v, { brief, reports: all })); }
+    return htmlResponse(reportsHubPage(v, { reports: shown, menu, floor: canFloor && !menu }));
   });
 
   const prepare = (ctx: { query: URLSearchParams }, user: Employee, key: string) => {

@@ -19,12 +19,12 @@ const cellHtml = (c: Cell, col: Column): Raw => (c && typeof c === 'object' ? ht
 const TONE: Record<string, string> = { sales: 'orange', support: 'blue', dev: 'violet', production: 'grey', company: 'navy', people: 'green', admin: 'grey' };
 const ICON: Record<ModuleId, string> = { sales: 'star', support: 'ticket', dev: 'code', production: 'factory', finance: 'rupee', attendance: 'calendar', hiring: 'user', appraisals: 'star', sops: 'checklist', approvals: 'approval', dsr: 'checklist', admin: 'settings' };
 
-export function reportsHubPage(v: View, d: { reports: ReportDef[]; menu: string }): Raw {
+export function reportsHubPage(v: View, d: { reports: ReportDef[]; menu: string; floor?: boolean }): Raw {
   const groups = [...new Set(d.reports.map((r) => r.module))];
   return page(v, {
     title: 'Reports', navTab: `reports:${d.menu || 'company'}`,
     subtitle: `${d.reports.length} report${d.reports.length === 1 ? '' : 's'} you can run. Each takes a date range and exports to Excel.`,
-    actions: when(d.menu && d.menu !== 'company', () => button('All reports', { href: '/reports' })),
+    actions: d.floor ? button('View from above', { href: '/reports' }) : when(d.menu && d.menu !== 'company', () => button('All reports', { href: '/reports' })),
     body: d.reports.length ? html`${groups.map((g) => html`<section class="card"><div class="card-head"><h2 style="gap:10px"><span class="sq sq-sm sq-${TONE[MENU_OF[g]] || 'blue'}">${icon(ICON[g], 16)}</span>${MODULE_NAME[g]}</h2><span class="small muted">${d.reports.filter((r) => r.module === g).length}</span></div>
         <div class="report-grid">${d.reports.filter((r) => r.module === g).map((r) => html`<a class="report-link" href="/reports/${r.key}"><b>${r.title}</b><span class="small muted">${r.about}</span></a>`)}</div></section>`)}`
       : empty('There are no reports for your role here. Ask an administrator if you need one.', '📊')

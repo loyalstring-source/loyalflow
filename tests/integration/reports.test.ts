@@ -45,7 +45,7 @@ describe('reports', () => {
   });
 
   test('the hub and every report page open for the COO; Excel export is a real workbook', async () => {
-    const hub = await (await coo.get('/reports')).text();
+    const hub = await (await coo.get('/reports?view=list')).text();
     for (const def of REPORTS) assert.ok(hub.includes(`/reports/${def.key}`), def.key);
     for (const def of REPORTS) { const r = await coo.get(`/reports/${def.key}${WIDE}`); assert.equal(r.status, 200, def.key); const h = await r.text(); assert.ok(h.includes(def.title), def.key); assert.ok(h.includes(`/reports/${def.key}.xlsx`), def.key); }
     for (const key of ['sales-by-person', 'att-summary', 'fin-budget', 'admin-audit']) {
