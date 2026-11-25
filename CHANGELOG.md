@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.21.0 — 25 Nov 2026
+One report for what every person did, and the Loyal String logo throughout.
+- **New report: "What each person did"** (Reports → Show as a list → Daily review, or `/reports/emp-activity`). One line per person for the period: days at work, days late, hours at work, daily-review lines planned and done, hours logged, tickets closed, deals won and their value, money collected, customer contacts, development items released and checklists completed.
+- **Click a name to see everything that person did, entry by entry**, newest first: when they came in and left, each daily-review line or work-log entry, collections, tickets closed, deals won, customer calls, visits and demos, development items released, checklists completed, approvals decided and timed work.
+- **Period buttons on every report:** Today, This week, This month, Last month, Last 3 months, Last 6 months, This financial year, Last 12 months. Any other dates can be typed in.
+- **Export to Excel** downloads exactly what is on screen, for the whole company or for one person.
+- Managers see only their own people. Employees who manage no one cannot open the report.
+- **Logo:** the Loyal String mark replaces the shield-and-rings logo on the sign-in page, the top bar, the browser tab and the phone app icon. Estimates already carry it.
+
 ## 1.20.0 — 25 Nov 2026
 Reports seen from above, in 3D.
 - **Reports opens on a view of the company from above** for executives, administrators and anyone who leads a team. Each team is a group of blocks on the floor with a pulsing marker over it. The marker is green, amber or red for the team's outlook this month, and the number on it is how many items need attention. Each block is one of the last four weeks against target.

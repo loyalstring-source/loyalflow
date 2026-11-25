@@ -76,3 +76,21 @@ describe('reports', () => {
     assert.equal(MENU_OF.hiring, 'people');
   });
 });
+
+describe('what each person did', () => {
+  test('one line per person, and one person entry by entry, with an Excel download', async () => {
+    const all = await (await coo.get('/reports/emp-activity' + WIDE)).text();
+    for (const h of ['Days at work', 'Review lines done', 'Tickets closed', 'Deals won', 'Customer contacts']) assert.match(all, new RegExp(h));
+    for (const r of ['Today', 'This week', 'Last 6 months', 'Last 12 months']) assert.match(all, new RegExp('>' + r + '<'));
+    const id = emp(s.app, BDM).id; assert.match(all, new RegExp('/reports/emp-activity\\?person=' + id));
+    const one = await (await coo.get('/reports/emp-activity' + WIDE + '&person=' + id)).text();
+    assert.match(one, /Entries by kind/); assert.match(one, /Attendance/); assert.match(one, /entr(y|ies) in the period/);
+    const x = await coo.get('/reports/emp-activity.xlsx' + WIDE + '&person=' + id); assert.equal(x.status, 200); assert.match(x.headers.get('content-type') || '', /spreadsheetml/);
+  });
+  test('a manager sees only their own people; an employee cannot open it', async () => {
+    const lead = new Client(s.base); await lead.login(SUPPORT_LEAD); const page = await (await lead.get('/reports/emp-activity' + WIDE)).text();
+    assert.ok(!page.includes('person=' + emp(s.app, BDM).id), 'no one from Sales');
+    const other = await (await lead.get('/reports/emp-activity' + WIDE + '&person=' + emp(s.app, BDM).id)).text(); assert.match(other, /0 entries in the period/);
+    const ic = new Client(s.base); await ic.login(SUPPORT_IC); assert.equal((await ic.get('/reports/emp-activity')).status, 403);
+  });
+});

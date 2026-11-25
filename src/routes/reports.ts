@@ -16,7 +16,8 @@ function quickRanges(now = new Date()): { label: string; from: string; to: strin
   const first = (yy: number, mm: number): string => { while (mm < 1) { mm += 12; yy--; } return `${yy}-${p2(mm)}-01`; };
   const lastDay = (yy: number, mm: number): string => { while (mm < 1) { mm += 12; yy--; } return `${yy}-${p2(mm)}-${p2(new Date(Date.UTC(yy, mm, 0)).getUTCDate())}`; };
   const fy = m >= 4 ? y : y - 1;
-  return [{ label: 'This month', from: first(y, m), to: today }, { label: 'Last month', from: first(y, m - 1), to: lastDay(y, m - 1) }, { label: 'Last 3 months', ...defaultRange(now) }, { label: 'This financial year', from: `${fy}-04-01`, to: today }, { label: 'Last 12 months', from: first(y, m - 11), to: today }];
+  const dow = new Date(today + 'T00:00:00Z').getUTCDay() || 7; const monday = new Date(Date.parse(today + 'T00:00:00Z') - (dow - 1) * 86400000).toISOString().slice(0, 10);
+  return [{ label: 'Today', from: today, to: today }, { label: 'This week', from: monday, to: today }, { label: 'This month', from: first(y, m), to: today }, { label: 'Last month', from: first(y, m - 1), to: lastDay(y, m - 1) }, { label: 'Last 3 months', ...defaultRange(now) }, { label: 'Last 6 months', from: first(y, m - 5), to: today }, { label: 'This financial year', from: `${fy}-04-01`, to: today }, { label: 'Last 12 months', from: first(y, m - 11), to: today }];
 }
 const xfmt = (c: Column): 'text' | 'number' | 'inr' => (c.fmt === 'money' ? 'inr' : c.fmt === 'int' || c.fmt === 'num' || c.fmt === 'pct' ? 'number' : 'text');
 const xcell = (c: Cell): string | number | null => (c && typeof c === 'object' ? c.text : c);

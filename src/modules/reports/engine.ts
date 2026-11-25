@@ -421,6 +421,59 @@ export const REPORTS: ReportDef[] = [
         chart: { title: 'Lines done by person', labels: rows.slice(0, 15).map((r) => (r[0] as { text: string }).text), values: rows.slice(0, 15).map((r) => Number(r[4])) } };
     } },
 
+  // ===== One person's work, across every module =====
+  { key: 'emp-activity', module: 'dsr', title: 'What each person did', about: 'One line per person for the period: days at work, daily-review lines, hours logged, tickets closed, deals won, money collected, customer contacts, development items released and checklists completed. Choose a person to see everything they did, entry by entry.', filters: ['department', 'person'], allowed: (app, u) => managerOrAbove(app, u) || scopeFor(app.db, u).level !== 'self',
+    run(app, c) {
+      const slot = "((CAST(substr(i.slot_to, 1, 2) AS INTEGER) * 60 + CAST(substr(i.slot_to, 4, 2) AS INTEGER)) - (CAST(substr(i.slot_from, 1, 2) AS INTEGER) * 60 + CAST(substr(i.slot_from, 4, 2) AS INTEGER))) / 60.0";
+      const hm = (col: string): string => `strftime('%H:%M', ${col}, ${TZ})`;
+      if (c.personId) {
+        // Everything one person did, newest first.
+        const allowed = !c.people || c.people.has(c.personId); const id = c.personId; const rg: Params = [id, c.from, c.to];
+        type E = { day: string; time: string | null; kind: string; what: string; result: string | null; href: string | null };
+        const q = (sql: string): E[] => (allowed ? app.db.all<E>(sql, rg) : []);
+        const all: E[] = [
+          ...q(`SELECT date AS day, ${hm('check_in')} AS time, 'Attendance' AS kind, 'Came in' || CASE WHEN check_out IS NOT NULL THEN ', left at ' || ${hm('check_out')} ELSE '' END AS what, CASE WHEN minutes_late > 0 THEN minutes_late || ' min late' ELSE status END AS result, NULL AS href FROM attendance WHERE employee_id = ? AND date BETWEEN ? AND ? AND check_in IS NOT NULL`),
+          ...q(`SELECT i.day, NULLIF(i.slot_from, '') AS time, CASE WHEN i.kind = 'collection' THEN 'Collection' WHEN COALESCE(i.slot_from, '') <> '' THEN 'Work log' ELSE 'Daily review' END AS kind,
+            CASE WHEN i.kind = 'collection' THEN COALESCE(NULLIF(i.customer, ''), i.title) ELSE i.title END || CASE WHEN COALESCE(i.slot_from, '') <> '' THEN ' (until ' || i.slot_to || ')' ELSE '' END AS what,
+            CASE WHEN i.kind = 'collection' THEN 'Received ₹' || CAST(ROUND(COALESCE(i.amount_actual, i.self_amount, 0)) AS INTEGER) || ' of ₹' || CAST(ROUND(COALESCE(i.amount_expected, 0)) AS INTEGER) ELSE replace(CASE WHEN i.status = 'planned' THEN COALESCE(i.self_status, 'planned') ELSE i.status END, '_', ' ') END AS result, '/dsr?team=' || i.department_id || '&day=' || i.day AS href
+            FROM dsr_items i WHERE i.employee_id = ? AND i.day BETWEEN ? AND ?`),
+          ...q(`SELECT ${ld('t.resolved_at')} AS day, ${hm('t.resolved_at')} AS time, 'Ticket closed' AS kind, t.subject AS what, CASE t.within_sla WHEN 1 THEN 'In promised time' WHEN 0 THEN 'Past promised time' ELSE NULL END AS result, '/tickets/' || t.id AS href FROM tickets t WHERE t.assignee_id = ? AND t.resolved_at IS NOT NULL AND ${ld('t.resolved_at')} BETWEEN ? AND ?`),
+          ...q(`SELECT ${ld('d.won_at')} AS day, ${hm('d.won_at')} AS time, 'Deal won' AS kind, d.title AS what, '₹' || CAST(ROUND(${netValue}) AS INTEGER) AS result, '/deals/' || d.id AS href FROM deals d WHERE d.owner_id = ? AND d.stage = 'won' AND ${ld('d.won_at')} BETWEEN ? AND ?`),
+          ...q(`SELECT ${ld('a.at')} AS day, ${hm('a.at')} AS time, 'Customer ' || a.kind AS kind, COALESCE((SELECT name FROM customers WHERE id = a.customer_id), '') || CASE WHEN a.notes <> '' THEN ': ' || a.notes ELSE '' END AS what, NULLIF(a.outcome, '') AS result, CASE WHEN a.deal_id IS NOT NULL THEN '/deals/' || a.deal_id ELSE NULL END AS href FROM activities a WHERE a.actor_id = ? AND ${ld('a.at')} BETWEEN ? AND ?`),
+          ...q(`SELECT ${ld('x.released_at')} AS day, ${hm('x.released_at')} AS time, 'Development released' AS kind, x.title AS what, x.type AS result, '/dev/' || x.id AS href FROM dev_issues x WHERE x.assignee_id = ? AND x.released_at IS NOT NULL AND ${ld('x.released_at')} BETWEEN ? AND ?`),
+          ...q(`SELECT ${ld('s.completed_at')} AS day, ${hm('s.completed_at')} AS time, 'Checklist completed' AS kind, COALESCE((SELECT name FROM sop_definitions WHERE id = s.sop_id), 'Checklist') AS what, NULL AS result, NULL AS href FROM sop_instances s WHERE s.assignee_id = ? AND s.completed_at IS NOT NULL AND ${ld('s.completed_at')} BETWEEN ? AND ?`),
+          ...q(`SELECT ${ld('k.decided_at')} AS day, ${hm('k.decided_at')} AS time, 'Approval decided' AS kind, k.title AS what, k.status AS result, NULL AS href FROM tasks k WHERE k.decided_by = ? AND k.decided_at IS NOT NULL AND ${ld('k.decided_at')} BETWEEN ? AND ?`),
+          ...q(`SELECT ${ld('l.started_at')} AS day, ${hm('l.started_at')} AS time, 'Timed work' AS kind, COALESCE(NULLIF(l.note, ''), replace(l.entity_type, '_', ' ') || ' ' || l.entity_id) AS what, ROUND(COALESCE(l.minutes, 0) / 60.0, 1) || ' h' AS result, NULL AS href FROM time_logs l WHERE l.employee_id = ? AND ${ld('l.started_at')} BETWEEN ? AND ?`)
+        ].sort((a, b) => (a.day === b.day ? (b.time || '').localeCompare(a.time || '') : b.day.localeCompare(a.day)));
+        const by = new Map<string, number>(); for (const e of all) by.set(e.kind, (by.get(e.kind) || 0) + 1);
+        const top = [...by.entries()].sort((a, b) => b[1] - a[1]);
+        const shown = all.slice(0, 3000);
+        return { columns: [{ header: 'Date', fmt: 'date' }, { header: 'Time' }, { header: 'Kind' }, { header: 'What', width: 60 }, { header: 'Result', width: 26 }],
+          rows: shown.map((e): Cell[] => [e.day, e.time, e.kind, e.href ? { text: e.what, href: e.href } : e.what, e.result ? e.result.charAt(0).toUpperCase() + e.result.slice(1) : null]),
+          chart: top.length ? { title: 'Entries by kind', labels: top.map((t) => t[0]), values: top.map((t) => t[1]) } : undefined,
+          note: `${all.length} entr${all.length === 1 ? 'y' : 'ies'} in the period${all.length > shown.length ? `; the first ${shown.length} are shown` : ''}. Clear the person to go back to one line per person.` };
+      }
+      const p0: Params = []; const w0 = who(c, 'e.id', p0, { deptVia: 'e.department_id' });
+      const people = app.db.all<{ id: string; name: string; team: string }>(`SELECT e.id, e.full_name AS name, d.name AS team FROM employees e JOIN departments d ON d.id = e.department_id WHERE e.status = 'active'${w0} ORDER BY d.name, e.full_name`, p0);
+      const agg = <T extends { id: string }>(sql: string): Map<string, T> => new Map(app.db.all<T>(sql, [c.from, c.to]).map((r) => [r.id, r]));
+      const att = agg<{ id: string; days: number; late: number; h: number | null }>(`SELECT employee_id AS id, COALESCE(SUM(day_value), 0) AS days, SUM(minutes_late > 0) AS late, SUM((julianday(check_out) - julianday(check_in)) * 24) AS h FROM attendance WHERE date BETWEEN ? AND ? AND check_in IS NOT NULL GROUP BY employee_id`);
+      const dsr = agg<{ id: string; n: number; done: number; h: number | null; got: number }>(`SELECT i.employee_id AS id, SUM(COALESCE(i.slot_from, '') = '') AS n, SUM(COALESCE(i.slot_from, '') = '' AND (i.status = 'done' OR (i.status = 'planned' AND i.self_status = 'done'))) AS done, SUM(CASE WHEN COALESCE(i.slot_from, '') <> '' AND COALESCE(i.slot_to, '') <> '' THEN ${slot} ELSE 0 END) AS h, COALESCE(SUM(CASE WHEN i.kind = 'collection' THEN COALESCE(i.amount_actual, i.self_amount, 0) ELSE 0 END), 0) AS got FROM dsr_items i WHERE i.day BETWEEN ? AND ? GROUP BY i.employee_id`);
+      const tk = agg<{ id: string; n: number }>(`SELECT assignee_id AS id, COUNT(*) AS n FROM tickets WHERE resolved_at IS NOT NULL AND assignee_id IS NOT NULL AND ${ld('resolved_at')} BETWEEN ? AND ? GROUP BY assignee_id`);
+      const dl = agg<{ id: string; n: number; v: number }>(`SELECT d.owner_id AS id, COUNT(*) AS n, COALESCE(SUM(${netValue}), 0) AS v FROM deals d WHERE d.stage = 'won' AND ${ld('d.won_at')} BETWEEN ? AND ? GROUP BY d.owner_id`);
+      const ac = agg<{ id: string; n: number }>(`SELECT actor_id AS id, COUNT(*) AS n FROM activities WHERE kind IN ('call', 'visit', 'demo') AND ${ld('at')} BETWEEN ? AND ? GROUP BY actor_id`);
+      const dv = agg<{ id: string; n: number }>(`SELECT assignee_id AS id, COUNT(*) AS n FROM dev_issues WHERE released_at IS NOT NULL AND assignee_id IS NOT NULL AND ${ld('released_at')} BETWEEN ? AND ? GROUP BY assignee_id`);
+      const sp = agg<{ id: string; n: number }>(`SELECT assignee_id AS id, COUNT(*) AS n FROM sop_instances WHERE completed_at IS NOT NULL AND assignee_id IS NOT NULL AND ${ld('completed_at')} BETWEEN ? AND ? GROUP BY assignee_id`);
+      const tl = agg<{ id: string; h: number }>(`SELECT employee_id AS id, COALESCE(SUM(minutes), 0) / 60.0 AS h FROM time_logs WHERE ${ld('started_at')} BETWEEN ? AND ? GROUP BY employee_id`);
+      const rows = people.map((e): Cell[] => { const a = att.get(e.id), d = dsr.get(e.id), x = dl.get(e.id);
+        return [{ text: e.name, href: `/reports/emp-activity?person=${e.id}&from=${c.from}&to=${c.to}` }, e.team, r1(a?.days || 0), a?.late || 0, r1(a?.h || 0), d?.n || 0, d?.done || 0, r1((d?.h || 0) + (tl.get(e.id)?.h || 0)), tk.get(e.id)?.n || 0, x?.n || 0, Math.round(x?.v || 0), Math.round(d?.got || 0), ac.get(e.id)?.n || 0, dv.get(e.id)?.n || 0, sp.get(e.id)?.n || 0]; });
+      const busiest = [...rows].sort((a, b) => Number(b[6]) + Number(b[8]) + Number(b[9]) + Number(b[12]) + Number(b[13]) + Number(b[14]) - (Number(a[6]) + Number(a[8]) + Number(a[9]) + Number(a[12]) + Number(a[13]) + Number(a[14]))).slice(0, 15);
+      const count = (r: Cell[]): number => Number(r[6]) + Number(r[8]) + Number(r[9]) + Number(r[12]) + Number(r[13]) + Number(r[14]);
+      return { columns: [{ header: 'Person' }, { header: 'Team' }, { header: 'Days at work', fmt: 'num' }, { header: 'Days late', fmt: 'int' }, { header: 'Hours at work', fmt: 'num' }, { header: 'Review lines planned', fmt: 'int' }, { header: 'Review lines done', fmt: 'int' }, { header: 'Hours logged', fmt: 'num' }, { header: 'Tickets closed', fmt: 'int' }, { header: 'Deals won', fmt: 'int' }, { header: 'Won value', fmt: 'money' }, { header: 'Collected', fmt: 'money' }, { header: 'Customer contacts', fmt: 'int' }, { header: 'Development released', fmt: 'int' }, { header: 'Checklists completed', fmt: 'int' }], rows,
+        totals: ['Total', null, r1(sum(rows, 2)), sum(rows, 3), r1(sum(rows, 4)), sum(rows, 5), sum(rows, 6), r1(sum(rows, 7)), sum(rows, 8), sum(rows, 9), sum(rows, 10), sum(rows, 11), sum(rows, 12), sum(rows, 13), sum(rows, 14)],
+        chart: busiest.some((r) => count(r) > 0) ? { title: 'Pieces of work finished, by person', labels: busiest.map((r) => (r[0] as { text: string }).text), values: busiest.map(count) } : undefined,
+        note: 'Click a name to see everything that person did in the period, entry by entry. "Pieces of work finished" adds review lines done, tickets closed, deals won, customer contacts, development items released and checklists completed.' };
+    } },
+
   // ===== Administration =====
   { key: 'admin-audit', module: 'admin', title: 'Who changed what', about: 'Every recorded change in the period, newest first: settings, roles, salaries, records. Shows up to 1,000 lines.', filters: ['person'], allowed: (app, u) => can(app.db, u, 'settings.admin'),
     run(app, c) {

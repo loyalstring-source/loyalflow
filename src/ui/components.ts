@@ -237,13 +237,9 @@ export { join };
 
 /** The Loyal Flow logo: two woven rings (one in ink, one gold) and the wordmark. `onDark` picks the colours for a black ground. */
 export function brandMark(onDark: boolean, width = 56): Raw {
-  // Shield for security, linked rings for people working together, waves for RFID.
-  const a = onDark ? '#FFFFFF' : '#0B3E78';
-  const b = onDark ? '#A9D0F7' : '#0B5CAB';
-  const bg = onDark ? '#0B3E78' : '#FFFFFF';
-  const acc = onDark ? '#E0BE5E' : '#C9A545';
-  const h = Math.round((width * 45) / 60);
-  return html`<svg class="brand-rings" width="${width}" height="${h}" viewBox="2 10 60 45" aria-hidden="true"><g transform="translate(32 32) scale(0.74) translate(-32 -32)"><path d="M32 5 L55 13 V31 C55 45 45 54 32 60 C19 54 9 45 9 31 V13 Z" fill="${a}"/><g transform="translate(32 31) scale(0.7) translate(-32 -32)"><circle cx="23" cy="32" r="14" fill="none" stroke="${bg}" stroke-width="8"/><path d="M28.31 26.08 A14 14 0 0 1 37.38 18.48" fill="none" stroke="${a}" stroke-width="12"/><circle cx="41" cy="32" r="14" fill="none" stroke="${acc}" stroke-width="8"/><path d="M26.62 45.52 A14 14 0 0 0 35.69 37.92" fill="none" stroke="${a}" stroke-width="12"/><path d="M23 46 A14 14 0 0 0 37 32" fill="none" stroke="${bg}" stroke-width="8"/></g></g><path d="M53.48 24.42 A15 15 0 0 1 53.48 37.58" fill="none" stroke="${b}" stroke-width="2.8" stroke-linecap="round"/><path d="M58.43 22.01 A20.5 20.5 0 0 1 58.43 39.99" fill="none" stroke="${b}" stroke-width="2.8" stroke-linecap="round"/><g transform="translate(24 31) rotate(180)"><path d="M13.48 -6.58 A15 15 0 0 1 13.48 6.58" fill="none" stroke="${b}" stroke-width="2.8" stroke-linecap="round"/><path d="M18.43 -8.99 A20.5 20.5 0 0 1 18.43 8.99" fill="none" stroke="${b}" stroke-width="2.8" stroke-linecap="round"/></g></svg>`;
+  // The Loyal String mark (monochrome), in white on dark backgrounds.
+  const w = Math.round(width * 0.82); const h = Math.round((w * 265) / 360);
+  return html`<img class="brand-rings" src="/static/${onDark ? 'ls-mark-white.png' : 'ls-mark.png'}" width="${w}" height="${h}" alt="">`;
 }
 
 export function brand(o: { onDark: boolean; href?: string; tagline?: boolean; width?: number; style?: string }): Raw {
