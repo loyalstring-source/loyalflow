@@ -85,7 +85,7 @@ export function estimateDocument(e: Estimate, items: EstimateItem[], s: Estimate
   const taxCols = inter ? 2 : 4; const lead = 5 + (anyDiscount ? 1 : 0);
   return html`<div class="est-doc">
     ${when(e.status === 'draft', () => html`<div class="est-mark" aria-hidden="true">Draft</div>`)}
-    <div class="est-head">${when(s.logo, () => html`<img class="est-logo" src="/static/loyalstring-logo.jpg" alt="${s.sellerName}">`)}
+    <div class="est-head">${when(s.logo, () => html`<img class="est-logo" src="/static/loyalstring-logo-mono.png" alt="${s.sellerName}">`)}
       <div class="est-co"><div class="est-seller">${s.sellerName}</div>${when(s.address, () => html`<div style="white-space:pre-line">${s.address}</div>`)}
         ${when(s.email, () => html`<div>Email: ${s.email}</div>`)}${when(contact, () => html`<div>${contact}</div>`)}${when(s.gstin, () => html`<div>GSTIN ${s.gstin}</div>`)}</div>
       <div class="est-title">Estimate</div></div>
@@ -119,7 +119,7 @@ export const ESTIMATE_CSS = raw(`<style>
 .est-doc table{margin:0;border-collapse:collapse}
 .est-mark{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:120px;font-weight:700;color:rgba(0,0,0,.06);transform:rotate(-35deg);pointer-events:none;letter-spacing:.05em}
 .est-head{display:flex;align-items:flex-end;gap:20px;padding:14px 16px 6px;border-bottom:1px solid #9a9a9a}
-.est-logo{width:170px;height:auto;flex:none;align-self:center}
+.est-logo{width:140px;height:auto;flex:none;align-self:center}
 .est-co{flex:1;min-width:0}.est-seller{font-size:17px;font-weight:700;margin-bottom:3px}
 .est-title{font-size:30px;font-weight:500;line-height:1;white-space:nowrap;padding-bottom:2px}
 .est-meta{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #9a9a9a}.est-meta>table{width:100%}.est-meta>table+table{border-left:1px solid #9a9a9a}

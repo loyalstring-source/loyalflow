@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.19.3 — 25 Nov 2026
+- **Estimates carry the new monochrome Loyal String logo** in place of the red and blue one. The LoyalFlow logo elsewhere is unchanged.
+
 ## 1.19.2 — 25 Nov 2026
 - **Daily review: a confirmed amount now shows at once.** Typing a figure in "Confirmed by lead" saved it only after leaving the box, and the totals at the top did not change until the page was reloaded, so it looked as if nothing had been saved. Each line now has a **Save** button (Enter also saves), and the totals, the person's line and the status refresh straight after. The same applies to a person's own update.
 - The sideways scroll bar under each person's lines is gone.
