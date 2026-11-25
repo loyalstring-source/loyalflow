@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.24.0 — 25 Nov 2026
+- **New report: "Time spent on each task"** (Reports → Show as a list → Daily review, the "Time by task" button on Team at work, or `/reports/time-by-task`). One line for every task, daily-review line, ticket or board item that someone timed: the person, the team, the task, how many times they worked on it, first started, last worked, hours worked, break hours and number of breaks during it, and its status now. Totals on top, a chart of hours by task, the usual period buttons, filters by team and person, and Export to Excel.
+- Clicking a name opens "What each person did" for that person, with each session and break listed by time.
+- Demo data now includes timed sessions and breaks for Development, Support and QA.
+
 ## 1.23.0 — 25 Nov 2026
 Work in hand: pending work, a running timer, breaks, and a live view for leads.
 - **Tasks is now "My work".** One list of everything waiting for a person: tasks given to them, today's daily-review lines, tickets assigned to them and development board items. Each shows who gave it, when it is due and the time already worked.

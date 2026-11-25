@@ -171,5 +171,22 @@ export function seedDemoExtras(app: App, now = new Date()): void {
       });
       if (Object.keys(values).length) saveTargets(app, coo, month, values);
     }
+    // ---- Timed work: sessions and breaks against past daily-review lines, so the time reports have something to show ----
+    if (!db.get('SELECT id FROM work_sessions LIMIT 1')) {
+      const lines = db.all<{ id: string; employee_id: string; day: string; title: string; planned_hours: number | null }>(`SELECT i.id, i.employee_id, i.day, i.title, i.planned_hours FROM dsr_items i JOIN departments d ON d.id = i.department_id
+        WHERE d.code IN ('DEV', 'SUP', 'QA') AND i.kind = 'task' AND COALESCE(i.slot_from, '') = '' AND i.day < ? AND i.day >= date(?, '-12 days') ORDER BY i.employee_id, i.day, i.id`, [today, today]);
+      const clock = new Map<string, number>();   // minutes past 09:30 local, per person and day
+      for (const l of lines) {
+        const key = `${l.employee_id}|${l.day}`; let at = clock.get(key) ?? Math.floor(rand() * 20);
+        const iso = (m: number): string => new Date(Date.parse(`${l.day}T04:00:00.000Z`) + m * 60_000).toISOString();
+        const total = Math.round((l.planned_hours || 1.5) * 60 * (0.7 + rand() * 0.6)); const first = Math.round(total * (0.4 + rand() * 0.3));
+        const add = (kind: string, note: string, from: number, mins: number): void => { db.run('INSERT INTO work_sessions (employee_id, entity_type, entity_id, title, kind, note, started_at, ended_at, minutes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [l.employee_id, 'dsr', l.id, l.title, kind, note, iso(from), iso(from + mins), mins]); };
+        add('work', '', at, first); at += first;
+        if (rand() < 0.6) { const b = 10 + Math.floor(rand() * 25); add('break', pick(['Tea', 'Lunch', 'Personal']), at, b); at += b; }
+        add('work', '', at, total - first); at += total - first + Math.floor(rand() * 15);
+        clock.set(key, at);
+      }
+    }
+
   });
 }

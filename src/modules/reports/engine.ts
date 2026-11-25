@@ -476,6 +476,29 @@ export const REPORTS: ReportDef[] = [
         note: 'Click a name to see everything that person did in the period, entry by entry. "Pieces of work finished" adds review lines done, tickets closed, deals won, customer contacts, development items released and checklists completed.' };
     } },
 
+  { key: 'time-by-task', module: 'dsr', title: 'Time spent on each task', about: 'For every task, daily-review line, ticket and board item that someone timed in the period: who worked on it, how many times they sat down to it, the first and last time, hours worked, break time taken during it, and whether it is finished.', filters: ['department', 'person'], allowed: (app, u) => managerOrAbove(app, u) || scopeFor(app.db, u).level !== 'self',
+    run(app, c) {
+      const p: Params = [c.from, c.to]; const w = who(c, 'w.employee_id', p);
+      const KIND: Record<string, string> = { task: 'Task', dsr: 'Daily review', ticket: 'Ticket', issue: 'Development' };
+      const rows = app.db.all<{ emp: string; name: string; team: string; type: string; id: string; title: string; n: number; first: string; last: string; work: number; brk: number; breaks: number; state: string | null }>(`SELECT e.id AS emp, e.full_name AS name, d.name AS team, w.entity_type AS type, w.entity_id AS id, MAX(w.title) AS title,
+          SUM(w.kind = 'work') AS n, MIN(w.started_at) AS first, MAX(COALESCE(w.ended_at, w.started_at)) AS last,
+          COALESCE(SUM(CASE WHEN w.kind = 'work' THEN w.minutes ELSE 0 END), 0) AS work, COALESCE(SUM(CASE WHEN w.kind = 'break' THEN w.minutes ELSE 0 END), 0) AS brk, SUM(w.kind = 'break') AS breaks,
+          CASE w.entity_type WHEN 'task' THEN (SELECT status FROM tasks WHERE id = w.entity_id) WHEN 'ticket' THEN (SELECT status FROM tickets WHERE id = w.entity_id) WHEN 'issue' THEN (SELECT status FROM dev_issues WHERE id = w.entity_id)
+            ELSE (SELECT CASE WHEN status = 'planned' THEN COALESCE(NULLIF(self_status, ''), 'planned') ELSE status END FROM dsr_items WHERE id = w.entity_id) END AS state
+        FROM work_sessions w JOIN employees e ON e.id = w.employee_id JOIN departments d ON d.id = e.department_id
+        WHERE ${ld('w.started_at')} BETWEEN ? AND ?${w} GROUP BY w.employee_id, w.entity_type, w.entity_id ORDER BY work DESC, e.full_name LIMIT 3000`, p);
+      const local = (iso: string): string => { const t = new Date(new Date(iso).getTime() + 330 * 60_000).toISOString(); return `${t.slice(8, 10)} ${MONTHS[Number(t.slice(5, 7)) - 1]}, ${t.slice(11, 16)}`; };
+      const href = (r: { type: string; id: string }): string | null => (r.type === 'ticket' ? `/tickets/${r.id}` : r.type === 'issue' ? `/dev/${r.id}` : null);
+      const nice = (x: string | null): string | null => (x ? (x.charAt(0).toUpperCase() + x.slice(1)).replace(/_/g, ' ') : null);
+      const out = rows.map((r): Cell[] => [{ text: r.name, href: `/reports/emp-activity?person=${r.emp}&from=${c.from}&to=${c.to}` }, r.team, KIND[r.type] || r.type, href(r) ? { text: r.title, href: href(r)! } : r.title, r.n, local(r.first), local(r.last), r1(r.work / 60), r1(r.brk / 60), r.breaks, nice(r.state)]);
+      const byTask = new Map<string, number>(); for (const r of rows) byTask.set(r.title, (byTask.get(r.title) || 0) + r.work / 60);
+      const top = [...byTask.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15);
+      return { columns: [{ header: 'Person' }, { header: 'Team' }, { header: 'Kind' }, { header: 'Task', width: 50 }, { header: 'Times worked on', fmt: 'int' }, { header: 'First started' }, { header: 'Last worked' }, { header: 'Hours worked', fmt: 'num' }, { header: 'Break hours', fmt: 'num' }, { header: 'Breaks', fmt: 'int' }, { header: 'Status now' }], rows: out,
+        totals: ['Total', null, null, null, sum(out, 4), null, null, r1(rows.reduce((n, r) => n + r.work, 0) / 60), r1(rows.reduce((n, r) => n + r.brk, 0) / 60), sum(out, 9), null],
+        chart: top.length ? { title: 'Hours by task', unit: 'h', labels: top.map((t) => t[0].length > 38 ? t[0].slice(0, 37) + '…' : t[0]), values: top.map((t) => Math.round(t[1] * 10) / 10) } : undefined,
+        note: rows.length ? 'Time counts only while the person had pressed Start on the item. Click a name to see their day entry by entry.' : 'Nothing was timed in this period. Time is recorded when a person presses Start on an item under My work.' };
+    } },
+
   // ===== Administration =====
   { key: 'admin-audit', module: 'admin', title: 'Who changed what', about: 'Every recorded change in the period, newest first: settings, roles, salaries, records. Shows up to 1,000 lines.', filters: ['person'], allowed: (app, u) => can(app.db, u, 'settings.admin'),
     run(app, c) {
