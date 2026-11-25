@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.19.1 — 25 Nov 2026
+- **Fix for the build on the server.** `npm run build` stopped with three type errors in `src/routes/brief.ts` and `src/routes/today.ts` (the overview page's reply type was not imported). The build now completes. Nothing changes on screen.
+
 ## 1.19.0 — 24 Nov 2026
 Estimates in the company's own format, and an hour-by-hour work log for Accounts.
 - **Estimates now print like the company's existing estimates.** Loyal String logo, "Loyal String International Pvt. Ltd.", the Bhosari address, email, website, phone and GSTIN at the top; Estimate number, date and valid-until; Place of supply and Sales person; Bill To; items with HSN/SAC, quantity, rate, amount, taxable amount and the tax columns; Sub total, Total and Total in words; Notes, Company bank details, Terms and conditions and Authorized signature. The customer's link shows the same page.

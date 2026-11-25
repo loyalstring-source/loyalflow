@@ -1,6 +1,6 @@
 // Company overview, monthly targets, and administrators.
 import type { App } from '../app.ts';
-import { Router, htmlResponse, HttpError } from '../lib/http.ts';
+import { Router, htmlResponse, HttpError, type Response } from '../lib/http.ts';
 import type { Employee } from '../modules/people/model.ts';
 import { listEmployees } from '../modules/people/model.ts';
 import { listTasks } from '../modules/tasks/service.ts';
