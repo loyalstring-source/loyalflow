@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.22.0 — 25 Nov 2026
+New sign-in page.
+- **The sign-in page follows the new design:** a company bar with the Loyal String logo, "LoyalFlow" and "Workforce Management"; "Sign in to LoyalFlow" on the left; "The future of work flows together." with Vision 2030 and the flowing ribbons on the right; "Loyal String International" at the foot. The reset-password pages use the same frame.
+- **Show password:** the eye in the password box shows or hides what was typed.
+- **Remember me:** when ticked, the sign-in is kept on that device for 14 days as before. When not ticked, the browser forgets it when it is closed.
+- **Need help signing in?** opens a short note on resetting a password and whom to ask.
+
 ## 1.21.0 — 25 Nov 2026
 One report for what every person did, and the Loyal String logo throughout.
 - **New report: "What each person did"** (Reports → Show as a list → Daily review, or `/reports/emp-activity`). One line per person for the period: days at work, days late, hours at work, daily-review lines planned and done, hours logged, tickets closed, deals won and their value, money collected, customer contacts, development items released and checklists completed.

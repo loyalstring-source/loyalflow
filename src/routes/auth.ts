@@ -41,7 +41,9 @@ export function registerPublic(r: Router<Employee>, app: App): void {
       if (ctx.wantsJson) return json({ ok: false, error: result.reason }, 401);
       return htmlResponse(loginPage({ csrf, error: result.reason, email: str(body, 'email'), next: str(body, 'next') }), 401);
     }
-    ctx.setCookies.push(cookie(SESSION_COOKIE, result.token, { maxAge: app.cfg.sessionDays * 86400, secure: app.cfg.cookieSecure, sameSite: 'Lax' }));
+    // "Remember me" keeps the sign-in on this device; without it the browser forgets it when it is closed. Apps signing in with JSON are remembered as before.
+    const remember = ctx.wantsJson || str(body, 'remember') === '1';
+    ctx.setCookies.push(cookie(SESSION_COOKIE, result.token, { maxAge: remember ? app.cfg.sessionDays * 86400 : undefined, secure: app.cfg.cookieSecure, sameSite: 'Lax' }));
     if (ctx.wantsJson) return json({ ok: true, redirect: result.user.must_change_password ? '/change-password' : safeNext(str(body, 'next')) });
     return redirect(result.user.must_change_password ? '/change-password' : safeNext(str(body, 'next')));
   });
