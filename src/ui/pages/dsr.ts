@@ -49,16 +49,16 @@ function itemRow(d: DsrPageData, it: DsrItem, open: boolean, lead: boolean, me: 
   const plan = html`<td class="num" style="text-align:right;white-space:nowrap">${money ? inr(it.amount_expected) : it.planned_hours == null ? '—' : `${it.planned_hours} h`}</td>`;
   // The person's own update.
   const own = hourly ? html`<span class="small muted">${it.self_at ? `Logged ${fmtDateTime(it.self_at)}` : 'Added by the team lead'}</span>` : open && mine
-    ? html`<span class="dsr-edit" data-url="/dsr/items/${it.id}/self">${money ? html`<input class="input dsr-in dsr-num" type="number" min="0" step="1" name="amount" value="${it.self_amount ?? ''}" placeholder="₹ received" aria-label="Amount received">` : html`${statusSelect('status', it.self_status, 'Your update')}<input class="input dsr-in dsr-pct" type="number" min="0" max="100" name="pct" value="${it.self_pct ?? ''}" placeholder="%" aria-label="Percent done">`}<input class="input dsr-in dsr-note" name="note" value="${it.self_note}" maxlength="500" placeholder="Note" aria-label="Note"><span class="dsr-saved" aria-live="polite"></span></span>`
+    ? html`<span class="dsr-edit" data-url="/dsr/items/${it.id}/self">${money ? html`<input class="input dsr-in dsr-num" type="number" min="0" step="1" name="amount" value="${it.self_amount ?? ''}" placeholder="₹ received" aria-label="Amount received">` : html`${statusSelect('status', it.self_status, 'Your update')}<input class="input dsr-in dsr-pct" type="number" min="0" max="100" name="pct" value="${it.self_pct ?? ''}" placeholder="%" aria-label="Percent done">`}<input class="input dsr-in dsr-note" name="note" value="${it.self_note}" maxlength="500" placeholder="Note" aria-label="Note"><button class="btn btn-sm dsr-save" type="button">Save</button><span class="dsr-saved" aria-live="polite"></span></span>`
     : it.self_at ? html`${money ? html`<b>${inr(it.self_amount)}</b>` : it.self_status ? statusPill(it.self_status as ItemStatus, it.self_status === 'partial' && it.self_pct != null ? `Partly done ${it.self_pct}%` : undefined) : ''} <span class="small muted">${it.self_note}</span>` : html`<span class="small muted">No update yet</span>`;
   // The lead's review.
   const unfinished = ['partial', 'not_done', 'blocked'].includes(st.status);
   const review = open && lead && !ownLog(d.viewer, it)
-    ? html`<span class="dsr-edit" data-url="/dsr/items/${it.id}/review">${money ? html`<input class="input dsr-in dsr-num" type="number" min="0" step="1" name="amount" value="${it.amount_actual ?? ''}" placeholder="₹ confirmed" aria-label="Amount confirmed">` : html`${statusSelect('status', it.status === 'planned' ? '' : it.status, 'Review')}<input class="input dsr-in dsr-pct" type="number" min="0" max="100" name="pct" value="${it.pct ?? ''}" placeholder="%" aria-label="Percent done">`}<input class="input dsr-in dsr-note" name="remark" value="${it.remark}" maxlength="500" placeholder="Remark" aria-label="Remark">${when(!hourly, () => html`<select class="input dsr-in" name="carry" aria-label="Tomorrow"><option value="carry" ${when(it.carry !== 'drop', 'selected')}>Carry if unfinished</option><option value="drop" ${when(it.carry === 'drop', 'selected')}>Drop</option></select>`)}<span class="dsr-saved" aria-live="polite"></span></span>`
+    ? html`<span class="dsr-edit" data-url="/dsr/items/${it.id}/review">${money ? html`<input class="input dsr-in dsr-num" type="number" min="0" step="1" name="amount" value="${it.amount_actual ?? ''}" placeholder="₹ confirmed" aria-label="Amount confirmed">` : html`${statusSelect('status', it.status === 'planned' ? '' : it.status, 'Review')}<input class="input dsr-in dsr-pct" type="number" min="0" max="100" name="pct" value="${it.pct ?? ''}" placeholder="%" aria-label="Percent done">`}<input class="input dsr-in dsr-note" name="remark" value="${it.remark}" maxlength="500" placeholder="Remark" aria-label="Remark">${when(!hourly, () => html`<select class="input dsr-in" name="carry" aria-label="Tomorrow"><option value="carry" ${when(it.carry !== 'drop', 'selected')}>Carry if unfinished</option><option value="drop" ${when(it.carry === 'drop', 'selected')}>Drop</option></select>`)}<button class="btn btn-sm dsr-save" type="button">Save</button><span class="dsr-saved" aria-live="polite"></span></span>`
     : html`${it.status === 'planned' ? html`<span class="small muted">${open ? 'Waiting for review' : ''}</span>` : html`${statusPill(it.status, it.status === 'partial' && it.pct != null ? `Partly done ${it.pct}%` : money && it.status !== 'not_done' ? `${STATUS_LABEL[it.status]} ${inr(it.amount_actual)}` : undefined)}`} <span class="small muted">${it.remark}</span>
         ${when(!open && unfinished, () => html`<span class="small muted">${it.carried_to ? '· moved to the next day' : '· dropped'}</span>`)}`;
   const canDelete = open && (lead || (mine && it.created_by === me && it.status === 'planned'));
-  return html`<tr>${what}${plan}<td>${own}</td><td>${review}</td><td style="width:36px;text-align:right">${when(canDelete, () => html`<button class="btn btn-ghost btn-sm" type="button" data-post="/dsr/items/${it.id}/delete" data-confirm="Remove this line?" title="Remove" aria-label="Remove">${icon('x', 14)}</button>`)}</td></tr>`;
+  return html`<tr>${what}${plan}<td>${own}</td><td>${review}</td><td style="text-align:right;padding-left:0">${when(canDelete, () => html`<button class="btn btn-ghost btn-sm" type="button" data-post="/dsr/items/${it.id}/delete" data-confirm="Remove this line?" title="Remove" aria-label="Remove">${icon('x', 14)}</button>`)}</td></tr>`;
 }
 
 function personCard(d: DsrPageData, m: { id: string; full_name: string; designation: string }, open: boolean, lead: boolean, me: string): Raw {
@@ -100,16 +100,21 @@ export function dsrPage(v: View, d: DsrPageData): Raw {
       ${when(d.customers.length, () => html`<datalist id="dsr-customers">${d.customers.map((c) => html`<option value="${c}"></option>`)}</datalist>`)}
       <script>(function () {
         var timers = new WeakMap();
+        var dirty = false;
+        function refreshWhenIdle() { var a = document.activeElement; if (dirty && !(a && a.closest && a.closest('.dsr-edit, .dsr-add'))) window.location.reload(); }
         function save(box) {
           var body = {}; box.querySelectorAll('[name]').forEach(function (el) { body[el.name] = el.value; });
           var mark = box.querySelector('.dsr-saved'); if (mark) mark.textContent = '…';
           window.LF.post(box.getAttribute('data-url'), body).then(function (res) {
-            if (res && res.ok) { if (mark) { mark.textContent = 'Saved'; setTimeout(function () { mark.textContent = ''; }, 1500); } }
+            if (res && res.ok) { if (mark) mark.textContent = 'Saved'; dirty = true; setTimeout(refreshWhenIdle, 250); }
             else { if (mark) mark.textContent = ''; window.LF.toast({ kind: 'critical', title: 'Not saved', body: (res && res.error) || 'Try again.' }); }
           });
         }
         function sync(box) { var s = box.querySelector('select[name=status]'), p = box.querySelector('[name=pct]'); if (s && p) p.style.visibility = s.value === 'partial' ? 'visible' : 'hidden'; }
         document.querySelectorAll('.dsr-edit').forEach(sync);
+        document.addEventListener('click', function (e) { var b = e.target.closest && e.target.closest('.dsr-save'); if (!b) return; var box = b.closest('.dsr-edit'); clearTimeout(timers.get(box)); b.blur(); save(box); });
+        document.addEventListener('keydown', function (e) { if (e.key !== 'Enter') return; var box = e.target.closest && e.target.closest('.dsr-edit'); if (!box || e.target.tagName !== 'INPUT') return; e.preventDefault(); e.target.blur(); clearTimeout(timers.get(box)); save(box); });
+        document.addEventListener('focusout', function () { setTimeout(refreshWhenIdle, 300); });
         document.addEventListener('change', function (e) { var box = e.target.closest && e.target.closest('.dsr-edit'); if (!box) return; sync(box); clearTimeout(timers.get(box)); timers.set(box, setTimeout(function () { save(box); }, 150)); });
       })();</script>`
   });

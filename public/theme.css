@@ -283,7 +283,7 @@ button.path-step.done:not(:disabled):hover{background:var(--good-ink);color:#FFF
 .dsr-line:first-child{border-top:0}.dsr-line:hover{background:var(--soft);text-decoration:none}
 .dsr-line-main{display:flex;flex-direction:column;min-width:0}.dsr-line-main b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dsr-table{table-layout:fixed}.dsr-table td{vertical-align:middle}
-.dsr-table th:nth-child(1){width:26%}.dsr-table th:nth-child(2){width:96px}.dsr-table th:nth-child(3){width:27%}.dsr-table th:nth-child(5){width:44px}
+.dsr-table th:nth-child(1){width:26%}.dsr-table th:nth-child(2){width:96px}.dsr-table th:nth-child(3){width:27%}.dsr-table th:nth-child(5){width:56px}
 @media (max-width:900px){.dsr-table{table-layout:auto}}
 .dsr-what{display:flex;flex-direction:column;gap:2px;min-width:180px}
 .dsr-edit{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
