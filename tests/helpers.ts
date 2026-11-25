@@ -20,7 +20,7 @@ export function emp(app: App, email: string): Employee {
   return e;
 }
 
-export const COO = 'sridhar.narayanagowda@loyalstring.com';
+export const COO = 'sridhar.ngowda@loyalstring.com';
 export const CEO = 'rahul.thakare@loyalstring.com';
 export const SALES_HEAD = 'muruganandam.k@loyalstring.com';
 export const SUPPORT_LEAD = 'prasad.panchal@loyalstring.com';

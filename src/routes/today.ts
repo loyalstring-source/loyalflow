@@ -2,6 +2,7 @@ import * as lists from '../lib/lists.ts';
 import { isCompanyLevel } from '../modules/brief/service.ts';
 import { overviewResponse } from './brief.ts';
 import { myItems, styleOf, today as dsrToday } from '../modules/dsr/service.ts';
+import { pendingFor, openSession } from '../modules/work/service.ts';
 import type { App } from '../app.ts';
 import { Router, htmlResponse, json } from '../lib/http.ts';
 import type { Employee } from '../modules/people/model.ts';
@@ -111,6 +112,7 @@ export function register(r: Router<Employee>, app: App): void {
     d.pwChanged = ctx.query.get('pw') === '1';
     d.dsr = myItems(app, v.user.id, dsrToday());
     d.dsrHourly = styleOf(app, v.user.department_id) === 'hourly';
+    d.work = { pending: pendingFor(app, v.user.id, dsrToday()), current: openSession(app, v.user.id) || null };
     return htmlResponse(todayPage(v, d));
   };
   // The people who run the company land on the company overview; their own day is one tab along.

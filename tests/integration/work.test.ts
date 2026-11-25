@@ -1,7 +1,7 @@
 // My work and Team at work: pending items, starting, breaks, passing a task on, and who can watch.
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { startServer, Client, type TestServer, testApp, emp, COO, BDM, SUPPORT_IC } from '../helpers.ts';
+import { startServer, Client, type TestServer, testApp, emp, COO, BDM, SUPPORT_IC, SUPPORT_LEAD } from '../helpers.ts';
 import { createTask, getTask, completeTask } from '../../src/modules/tasks/service.ts';
 import { startWork, takeBreak, resumeWork, stopWork, openSession, pendingFor, dayOf, canWatch, watchable, colleagues, passTask } from '../../src/modules/work/service.ts';
 import { localDateString } from '../../src/lib/time.ts';
@@ -70,5 +70,36 @@ describe('work in hand, in the browser', () => {
     assert.equal((await dev.postJson('/work/resume', {})).status, 200); assert.equal((await dev.postJson('/work/stop', {})).status, 200);
     assert.equal((await (await login(SUPPORT_IC)).get('/tasks/team')).status, 403);
     assert.equal((await dev.postJson('/work/start', { type: 'ticket', id: 'NOPE' })).status, 404);
+  });
+});
+
+describe('boards: drag a tile, or remark on it', () => {
+  let s: TestServer; before(async () => { s = await startServer(); }); after(async () => { await s.close(); });
+  const login = async (email: string): Promise<Client> => { const c = new Client(s.base); await c.login(email); return c; };
+  test('a ticket moves between columns with a remark; a remark alone is kept; it cannot go back to New', async () => {
+    const lead = await login(SUPPORT_LEAD); const board = await (await lead.get('/desk')).text();
+    assert.match(board, /data-board="\/tickets\/"/); assert.match(board, /data-drop="in_progress"/); assert.match(board, /data-card-remark/); assert.ok(!board.includes('data-drop="new"'));
+    const t = s.app.db.get<{ id: string }>("SELECT id FROM tickets WHERE status = 'assigned' LIMIT 1")!; const st = (): string => s.app.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [t.id])!.status;
+    assert.equal((await lead.postJson(`/tickets/${t.id}/move`, { to: 'in_progress', note: 'Called the customer' })).status, 200); assert.equal(st(), 'in_progress');
+    assert.equal((await lead.postJson(`/tickets/${t.id}/move`, { to: 'waiting' })).status, 200); assert.equal(st(), 'waiting_customer');
+    assert.equal((await lead.postJson(`/tickets/${t.id}/move`, { note: 'Firmware file awaited' })).status, 200); assert.equal(st(), 'waiting_customer');
+    const page = await (await lead.get(`/tickets/${t.id}`)).text(); assert.match(page, /Called the customer/); assert.match(page, /Firmware file awaited/);
+    assert.equal((await lead.postJson(`/tickets/${t.id}/move`, { to: 'resolved', note: 'Fixed' })).status, 200); assert.equal(st(), 'resolved');
+    assert.equal((await lead.postJson(`/tickets/${t.id}/move`, { to: 'in_progress', note: 'Came back' })).status, 200); assert.notEqual(st(), 'resolved');
+    assert.equal((await lead.postJson(`/tickets/${t.id}/move`, { to: 'new' })).status, 400); assert.equal((await lead.postJson(`/tickets/${t.id}/move`, {})).status, 400);
+    assert.equal((await (await login(BDM)).postJson(`/tickets/${t.id}/move`, { to: 'assigned' })).status, 403);
+  });
+  test('a board item moves between columns and takes a remark', async () => {
+    const karan = await login(KARAN); const board = await (await karan.get('/dev')).text(); assert.match(board, /data-board="\/dev\/"/); assert.match(board, /data-drop="in_review"/);
+    const i = s.app.db.get<{ id: string }>("SELECT id FROM dev_issues WHERE status = 'planned' LIMIT 1") || s.app.db.get<{ id: string }>("SELECT id FROM dev_issues WHERE status = 'backlog' LIMIT 1")!;
+    assert.equal((await karan.postJson(`/dev/${i.id}/move`, { to: 'in_progress', note: 'Picked up today' })).status, 200);
+    assert.equal(s.app.db.get<{ status: string }>('SELECT status FROM dev_issues WHERE id = ?', [i.id])!.status, 'in_progress');
+    assert.ok(s.app.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM issue_comments WHERE issue_id = ? AND text LIKE '%Picked up today%'", [i.id])!.n >= 1);
+    assert.equal((await karan.postJson(`/dev/${i.id}/move`, { to: 'nowhere' })).status, 400);
+  });
+  test('the home page lists what is assigned to the person; the COO signs in with the new address', async () => {
+    const karan = await login(KARAN); const devId = emp(s.app, DEV).id; await karan.postJson('/tasks', { title: 'Review the tag import screen', assigneeId: devId });
+    const home = await (await (await login(DEV)).get('/')).text(); assert.match(home, /Assigned to you/); assert.match(home, /Review the tag import screen/); assert.match(home, /data-post="\/work\/start"/);
+    assert.equal(COO, 'sridhar.ngowda@loyalstring.com'); assert.equal(emp(s.app, COO).id, 'LS002');
   });
 });

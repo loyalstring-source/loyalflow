@@ -87,7 +87,7 @@ test('an IC cannot open the company page or settings', async ({ page }) => {
 });
 
 test('phase 2: procurement, budgets, travel, hours and imports open; timer runs on a work order', async ({ page }) => {
-  await login(page, 'sridhar.narayanagowda@loyalstring.com');
+  await login(page, 'sridhar.ngowda@loyalstring.com');
   for (const [url, h1] of [['/procurement', 'Procurement'], ['/budgets', 'Budgets'], ['/travel', 'Sales travel'], ['/hours', 'Man-hours'], ['/imports', 'Import data']]) {
     await page.goto(url); await expect(page.locator('h1')).toHaveText(h1);
   }

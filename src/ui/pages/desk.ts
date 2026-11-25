@@ -27,14 +27,15 @@ export function implChip(t: TicketView, now: Date): Raw {
   return pill(`Day ${day} of ${plan}`, day > plan ? 'crit' : day > plan * 0.8 ? 'warn' : 'violet', `Implementation plan: ${plan} days`);
 }
 
-export function ticketCard(t: TicketView, now: Date): Raw {
+const COLUMN_OF = (status: string): string => COLUMNS.find((c) => c.statuses.includes(status))?.key || status;
+export function ticketCard(t: TicketView, now: Date, canMove = false): Raw {
   const s = slaState(t, now);
-  return html`<a class="kcard ${t.priority === 'P1' ? 'kcard-p1' : ''}" href="/tickets/${t.id}" data-drawer="/tickets/${t.id}" style="text-decoration:none;color:inherit">
+  return html`<div class="kwrap" ${when(canMove, () => html`draggable="true" data-card="${t.id}" data-col="${COLUMN_OF(t.status)}" data-card-title="${t.id} · ${t.subject}"`)}><a class="kcard ${t.priority === 'P1' ? 'kcard-p1' : ''}" href="/tickets/${t.id}" data-drawer="/tickets/${t.id}" draggable="false" style="text-decoration:none;color:inherit">
     <div class="row between"><span class="row" style="gap:6px">${priorityPill(t.priority)}<span class="xs faint mono">${t.id}</span></span>${t.type === 'implementation' ? pill('Impl.', 'violet') : t.type === 'internal' ? pill('Internal', 'ink') : ''}</div>
     <div class="kcard-title">${t.subject}</div>
     <div class="small muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.customer_name || 'Internal'}</div>
     <div class="row between">${avatar(t.assignee_name, t.assignee_id || '')}${t.status === 'waiting_dev' ? pill(`Dev: ${(t.dev_status || 'backlog').replace('_', ' ')}`, 'violet') : t.status === 'waiting_customer' ? pill('Customer', 'ink') : t.status === 'resolved' ? pill(t.rating ? `★ ${t.rating}` : 'Resolved', 'good') : t.type === 'implementation' ? implChip(t, now) : slaChip(s)}</div>
-  </a>`;
+  </a>${when(canMove, () => html`<button class="kcard-remark" type="button" data-card-remark title="Add a remark or move this ticket">${icon('edit', 12)} Remark</button>`)}</div>`;
 }
 
 export function deskPage(v: View, d: DeskData): Raw {
@@ -52,7 +53,8 @@ export function deskPage(v: View, d: DeskData): Raw {
         <a class="chip ${f.type === 'implementation' ? 'on' : ''}" href="${link({ type: f.type === 'implementation' ? null : 'implementation' })}">Implementations</a>
         <form method="get" action="/desk" class="row" style="margin-left:auto">${when(f.mine, () => html`<input type="hidden" name="mine" value="1">`)}<input class="input" name="q" value="${f.q}" placeholder="Search subject, id, customer" style="min-height:36px;width:240px"></form>
       </div>
-      <div class="board-wrap"><div class="board board-5">${COLUMNS.map((c) => { const items = d.tickets.filter((t) => c.statuses.includes(t.status)); return html`<div class="column ${c.cls || ''}"><div class="column-head"><span>${c.title}</span><span class="count">${items.length}</span></div>${items.length ? items.map((t) => ticketCard(t, d.now)) : empty(c.key === 'new' ? 'Inbox zero 🎉' : 'Nothing here', c.key === 'new' ? '📭' : '✨')}</div>`; })}</div></div>`
+      ${when(d.canWrite, () => html`<p class="small muted board-hint">Drag a ticket to another column to move it, or press Remark on a ticket. On a phone, use Remark and choose where to move it.</p>`)}
+      <div class="board-wrap"><div class="board board-5" ${when(d.canWrite, () => html`data-board="/tickets/"`)}>${COLUMNS.map((c) => { const items = d.tickets.filter((t) => c.statuses.includes(t.status)); return html`<div class="column ${c.cls || ''}" ${when(c.key !== 'new', () => html`data-drop="${c.key}" data-drop-label="${c.title}"`)}><div class="column-head"><span>${c.title}</span><span class="count">${items.length}</span></div>${items.length ? items.map((t) => ticketCard(t, d.now, d.canWrite)) : empty(c.key === 'new' ? 'Inbox zero 🎉' : 'Nothing here', c.key === 'new' ? '📭' : '✨')}</div>`; })}</div></div>`
   });
 }
 

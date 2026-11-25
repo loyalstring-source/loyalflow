@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.25.0 — 25 Nov 2026
+Drag and drop on the boards, assigned work on the home page, and the COO's new email.
+- **Drag and drop on the Support and Development boards.** Drag a ticket or a board item to another column to move it. A small box asks for an optional remark and then moves it. The remark is kept on the ticket's history or the item's comments.
+- **Remark button on every tile.** Press it to write a remark without opening the ticket or item, or to choose a column to move to. On a phone, where dragging is not available, this is how a tile is moved.
+- Rules stay as they were: a ticket cannot be dragged back to New; dragging to Resolved resolves it and starts the customer's rating link; dragging a resolved ticket back reopens it; a ticket nobody holds is assigned to the person who moves it; the Development board refuses moves its rules do not allow and says why.
+- **Home page: "Assigned to you".** Every person's home page lists their pending tasks, today's daily-review lines, tickets and board items, with Start on each and what they are working on now.
+- **The COO's sign-in email is now sridhar.ngowda@loyalstring.com.** An existing system is updated when it restarts; the password does not change.
+
 ## 1.24.0 — 25 Nov 2026
 - **New report: "Time spent on each task"** (Reports → Show as a list → Daily review, the "Time by task" button on Team at work, or `/reports/time-by-task`). One line for every task, daily-review line, ticket or board item that someone timed: the person, the team, the task, how many times they worked on it, first started, last worked, hours worked, break hours and number of breaks during it, and its status now. Totals on top, a chart of hours by task, the usual period buttons, filters by team and person, and Export to Excel.
 - Clicking a name opens "What each person did" for that person, with each session and break listed by time.

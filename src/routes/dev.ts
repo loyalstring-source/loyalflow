@@ -104,6 +104,17 @@ export function register(r: Router<Employee>, app: App): void {
     const d: IssueDetail = { i, comments: comments(app, i.id), checks: checks(app, i.id), linked: listTickets(app, { limit: 2000 }).filter((x) => x.dev_issue_id === i.id), people: devs(app), projects: listProjects(app), sprints: listSprints(app, 6), releases: listReleases(app), customers: listCustomers(app), canWrite: can(app.db, v.user, 'dev.write'), canManage: can(app.db, v.user, 'desk.manage') && ['DEV', 'QA', 'LEAD'].includes(v.deptCode) || v.user.functional_role === 'executive', isQa: isQa(app, v.user), time: { logs: t.logs, minutes: t.minutes, running: runningTimer(app, v.user.id) }, now: new Date() };
     return render(ctx, () => issuePage(v, d), () => issueDrawer(v, d));
   });
+  // Dragging an item to another column on the board, or a remark written on its tile.
+  r.post('/dev/:id/move', async (ctx) => {
+    const me = user(ctx); requireCan(app.db, me, 'dev.write'); const b = await ctx.body(); const id = ctx.params.id;
+    const to = str(b, 'to'); const note = str(b, 'note').trim().slice(0, 1000);
+    if (!to && !note) return fail(ctx, 400, 'Write a remark, or choose where to move the item.');
+    try {
+      if (to) { if (!DEV_STATUSES.includes(to as DevStatus)) return fail(ctx, 400, 'An item cannot be moved there.'); const cur = getDevIssue(app, id); if (!cur) return fail(ctx, 404, 'Item not found'); if (cur.status !== to) setDevStatus(app, me, id, to as DevStatus); }
+      if (note) addComment(app, me, id, note);
+      return done(ctx, { reload: true, confetti: to === 'released', toast: { title: to ? `${id} moved to ${to.replace(/_/g, ' ')}` : 'Remark added', body: to ? undefined : id, kind: 'success' } });
+    } catch (e) { if (e instanceof HttpError) return fail(ctx, e.status, e.message); throw e; }
+  });
   r.post('/dev/:id/status', async (ctx) => {
     const me = user(ctx); requireCan(app.db, me, 'dev.write'); const b = await ctx.body();
     const s = str(b, 'status') as DevStatus; if (!DEV_STATUSES.includes(s)) return fail(ctx, 400, 'Unknown status');

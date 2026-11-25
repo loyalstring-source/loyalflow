@@ -95,6 +95,21 @@ export function register(r: Router<Employee>, app: App): void {
     return done(ctx, { reload: true, toast: { title: s === 'in_progress' ? 'Work started' : s === 'waiting_customer' ? 'Waiting on the customer' : 'Status updated', kind: 'success' } });
   });
 
+  // Dragging a ticket to another column on the board, or a remark written on its tile.
+  r.post('/tickets/:id/move', async (ctx) => {
+    const me = user(ctx); requireCan(app.db, me, 'desk.write'); const b = await ctx.body(); const id = ctx.params.id;
+    const to = str(b, 'to'); const note = str(b, 'note').trim().slice(0, 1000); const t = requireTicket(app, id);
+    if (!to) { if (!note) return fail(ctx, 400, 'Write a remark, or choose where to move the ticket.'); replyToCustomer(app, me, id, note, 'note'); return done(ctx, { reload: true, toast: { title: 'Remark added', body: t.id, kind: 'success' } }); }
+    if (!['assigned', 'in_progress', 'waiting', 'resolved'].includes(to)) return fail(ctx, 400, 'A ticket cannot be moved there.');
+    if (to === 'resolved') { if (!['resolved', 'closed'].includes(t.status)) resolveTicket(app, me, id, note); else if (note) replyToCustomer(app, me, id, note, 'note'); return done(ctx, { reload: true, toast: { title: `${t.id} resolved`, kind: 'success' } }); }
+    // Coming back from Resolved is a reopening and is recorded as one.
+    if (t.status === 'resolved' || t.status === 'closed') reopenTicket(app, me, id, note || 'Moved back on the board');
+    if (!t.assignee_id) assignTicket(app, me, id, me.id);   // work cannot start on a ticket nobody holds
+    const status: TicketStatus = to === 'waiting' ? 'waiting_customer' : (to as TicketStatus);
+    if (requireTicket(app, id).status !== status) setStatus(app, me, id, status, note); else if (note && t.status !== 'resolved' && t.status !== 'closed') replyToCustomer(app, me, id, note, 'note');
+    return done(ctx, { reload: true, toast: { title: `${t.id} moved to ${to === 'waiting' ? 'Waiting' : to === 'assigned' ? 'Assigned' : 'In progress'}`, kind: 'success' } });
+  });
+
   r.post('/tickets/:id/escalate', async (ctx) => {
     const me = user(ctx); requireCan(app.db, me, 'desk.write');
     const b = await ctx.body();

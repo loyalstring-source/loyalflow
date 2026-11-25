@@ -6,6 +6,6 @@ if not exist node_modules (npm install --no-audit --no-fund)
 if "%LOYALFLOW_DEMO%"=="" set LOYALFLOW_DEMO=1
 if "%PORT%"=="" set PORT=3000
 echo Starting LoyalFlow on http://localhost:%PORT% (demo data: %LOYALFLOW_DEMO%)
-echo Sign in as sridhar.narayanagowda@loyalstring.com / Welcome@LoyalFlow1
+echo Sign in as sridhar.ngowda@loyalstring.com / Welcome@LoyalFlow1
 node --no-warnings=ExperimentalWarning src\server.ts
 pause

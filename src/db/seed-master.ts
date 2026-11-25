@@ -72,6 +72,8 @@ export const EMPLOYEES: Row[] = [
   ['LS044', 'Pranjal Chaturvedi', 'Production Helper (Computer Operator)', 'PRD', '', 'MFG', 'ic', 'LS039', 'PRD']
 ];
 
+/** People whose work email is not simply first.last. */
+const EMAIL_OVERRIDE: Record<string, string> = { LS002: 'sridhar.ngowda' };
 export function emailFor(name: string, domain: string): string {
   const parts = name.toLowerCase().normalize('NFKD').replace(/[^a-z\s]/g, '').trim().split(/\s+/);
   const local = parts.length > 1 ? `${parts[0]}.${parts[parts.length - 1]}` : parts[0];
@@ -129,7 +131,7 @@ export function seedMaster(app: App, opts: { password?: string; mustChange?: boo
       if (exists) continue;
       db.run(`INSERT INTO employees (id, full_name, email, password_hash, must_change_password, designation, department_id, sub_team, site_id, functional_role,
         reporting_manager_id, shift_code, employment_type, status, is_admin, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Full-time', 'active', ?, ?, ?)`,
-        [id, name, emailFor(name, cfg.emailDomain), hash, mustChange ? 1 : 0, designation, dept, subTeam, site, role, manager, shift, id === 'LS001' || id === 'LS002' ? 1 : 0, nowIso, nowIso]);
+        [id, name, EMAIL_OVERRIDE[id] ? `${EMAIL_OVERRIDE[id]}@${cfg.emailDomain}` : emailFor(name, cfg.emailDomain), hash, mustChange ? 1 : 0, designation, dept, subTeam, site, role, manager, shift, id === 'LS001' || id === 'LS002' ? 1 : 0, nowIso, nowIso]);
     }
     for (const s of SOPS) {
       db.run('INSERT OR IGNORE INTO sop_definitions (id, name, department_id, owner_role, trigger, trigger_detail, steps, version, active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?)',

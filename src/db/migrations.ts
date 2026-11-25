@@ -1237,5 +1237,12 @@ CREATE TABLE work_sessions (
 CREATE INDEX idx_work_sessions_person ON work_sessions(employee_id, started_at);
 CREATE INDEX idx_work_sessions_item ON work_sessions(entity_type, entity_id);
 `
+  },
+  {
+    id: '0018_coo_email',
+    sql: `
+-- The COO's work email changed (25 Nov 2026). Only the old address is rewritten, so a later change is not undone.
+UPDATE employees SET email = 'sridhar.ngowda@loyalstring.com' WHERE id = 'LS002' AND email = 'sridhar.narayanagowda@loyalstring.com';
+`
   }
 ];

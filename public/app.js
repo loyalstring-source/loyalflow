@@ -308,3 +308,36 @@
 
   window.LF = { post: post, toast: toast, confetti: confetti, burst: burst, initMotion: initMotion, openDrawer: openDrawer, closeDrawer: closeDrawer, openModal: openModal, closeModal: closeModal };
 })();
+
+/* ---------- Boards: drag a tile to another column, or write a remark on the tile ---------- */
+(function () {
+  var dlg = null, state = null;
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function open(board, card, to) {
+    var cols = [].slice.call(board.querySelectorAll('[data-drop]')); var from = card.getAttribute('data-col');
+    state = { url: board.getAttribute('data-board') + encodeURIComponent(card.getAttribute('data-card')) + '/move' };
+    if (!dlg) { dlg = document.createElement('dialog'); dlg.className = 'board-dlg'; document.body.appendChild(dlg); dlg.addEventListener('close', function () { state = null; }); }
+    dlg.innerHTML = '<form method="dialog" class="form"><h2>' + (to ? 'Move' : 'Remark') + '</h2><p class="small muted" style="margin:0">' + esc(card.getAttribute('data-card-title') || '') + '</p>' +
+      '<label class="field"><span>Move to</span><select class="input" name="to"><option value="">Leave where it is</option>' + cols.filter(function (c) { return c.getAttribute('data-drop') !== from; }).map(function (c) { var k = c.getAttribute('data-drop'); return '<option value="' + esc(k) + '"' + (k === to ? ' selected' : '') + '>' + esc(c.getAttribute('data-drop-label')) + '</option>'; }).join('') + '</select></label>' +
+      '<label class="field"><span>Remark' + (to ? ' (optional)' : '') + '</span><textarea class="input" name="note" rows="3" maxlength="1000" placeholder="What was done, or what is needed next"></textarea></label>' +
+      '<div class="row" style="justify-content:flex-end;gap:8px"><button class="btn" type="button" data-x>Cancel</button><button class="btn btn-primary" type="submit">' + (to ? 'Move' : 'Save') + '</button></div></form>';
+    dlg.querySelector('[data-x]').addEventListener('click', function () { dlg.close(); });
+    dlg.querySelector('form').addEventListener('submit', function (e) {
+      e.preventDefault(); if (!state) return; var f = e.target; var body = { to: f.to.value, note: f.note.value }; var btn = f.querySelector('[type=submit]');
+      if (!body.to && !body.note.trim()) { f.note.focus(); return; }
+      btn.disabled = true;
+      window.LF.post(state.url, body).then(function (res) {
+        if (res && res.ok) { dlg.close(); window.location.reload(); }
+        else { btn.disabled = false; window.LF.toast({ kind: 'critical', title: 'Not moved', body: (res && res.error) || 'Try again.' }); }
+      });
+    });
+    if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
+    var n = dlg.querySelector(to ? 'textarea' : 'textarea'); if (n) n.focus();
+  }
+  var dragging = null;
+  document.addEventListener('dragstart', function (e) { var c = e.target.closest && e.target.closest('[data-card]'); if (!c || !c.closest('[data-board]')) return; dragging = c; c.classList.add('is-dragging'); try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', c.getAttribute('data-card')); } catch (x) {} });
+  document.addEventListener('dragend', function () { if (dragging) dragging.classList.remove('is-dragging'); dragging = null; document.querySelectorAll('.drop-on').forEach(function (c) { c.classList.remove('drop-on'); }); });
+  document.addEventListener('dragover', function (e) { if (!dragging) return; var col = e.target.closest && e.target.closest('[data-drop]'); document.querySelectorAll('.drop-on').forEach(function (c) { if (c !== col) c.classList.remove('drop-on'); }); if (!col || col.closest('[data-board]') !== dragging.closest('[data-board]')) return; e.preventDefault(); if (col.getAttribute('data-drop') !== dragging.getAttribute('data-col')) col.classList.add('drop-on'); });
+  document.addEventListener('drop', function (e) { if (!dragging) return; var col = e.target.closest && e.target.closest('[data-drop]'); var card = dragging; if (!col) return; e.preventDefault(); col.classList.remove('drop-on'); if (col.getAttribute('data-drop') === card.getAttribute('data-col')) return; open(card.closest('[data-board]'), card, col.getAttribute('data-drop')); });
+  document.addEventListener('click', function (e) { var b = e.target.closest && e.target.closest('[data-card-remark]'); if (!b) return; e.preventDefault(); e.stopPropagation(); var card = b.closest('[data-card]'); if (card) open(card.closest('[data-board]'), card, ''); });
+})();

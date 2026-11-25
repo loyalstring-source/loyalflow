@@ -1,5 +1,5 @@
 // Reset one person's password back to the starter password and clear any lockout.
-//   node --no-warnings=ExperimentalWarning scripts\reset-password.ts sridhar.narayanagowda@loyalstring.com
+//   node --no-warnings=ExperimentalWarning scripts\reset-password.ts sridhar.ngowda@loyalstring.com
 // With no email, lists every account and whether it is locked.
 import { createApp } from '../src/app.ts';
 import { hashPassword, passwordProblems } from '../src/lib/crypto.ts';

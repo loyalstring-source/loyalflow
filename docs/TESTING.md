@@ -20,7 +20,7 @@ The e2e config starts its own server on port 3100 with an in-memory database and
 
 ## Manual functional check (for the COO)
 A suggested path through the demo data, 20 minutes:
-1. Sign in as yourself (`sridhar.narayanagowda@…`). Today → approve the ₹62,400 expense and the 14 % discount.
+1. Sign in as yourself (`sridhar.ngowda@…`). Today → approve the ₹62,400 expense and the 14 % discount.
 2. Company page → note the red streaks → open *Overdue follow-ups* → see who owns them → *PowerPoint*.
 3. Service desk → open the P1 (red border) → reply → resolve → watch it move to Resolved. Open a Waiting (Dev) ticket → see the linked issue.
 4. Development → move the linked issue to *released* → back on the desk the ticket is *In progress* again.

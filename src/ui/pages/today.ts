@@ -13,6 +13,7 @@ import type { Tile } from '../../modules/kpi/engine.ts';
 import { fmtDate, fmtTime, money, relativeAge, inr } from '../../lib/time.ts';
 import { can } from '../../lib/scope.ts';
 
+import { WORK_TYPE_LABEL, type PendingItem, type Session } from '../../modules/work/service.ts';
 export interface TodayData {
   now: Date;
   runs: SopInstance[];
@@ -33,6 +34,8 @@ export interface TodayData {
   leave: { code: string; label: string; quota: number; used: number; active: boolean }[];
   /** My team keeps an hour-by-hour work log. */
   dsrHourly?: boolean;
+  /** Everything assigned to the person and still open, and what they are on now. */
+  work?: { pending: PendingItem[]; current: Session | null };
   /** My lines on today's daily review. */
   dsr?: { id: string; kind: string; title: string; customer: string; amount_expected: number | null; planned_hours: number | null; status: string; self_status: string; department_id: string }[];
   pwChanged: boolean;
@@ -70,6 +73,11 @@ export function todayPage(v: View, d: TodayData): Raw {
     : dsrLines.length ? html`<section class="card reveal"><div class="card-head"><h2>Your day plan</h2><a class="small" href="/dsr">Update</a></div>
     <ul class="list" style="margin-top:4px">${dsrLines.slice(0, 8).map((i) => { const st = i.status !== 'planned' ? i.status : i.self_status; return html`<li style="display:flex;justify-content:space-between;gap:10px;align-items:center"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${i.kind === 'collection' ? `${i.customer} · ₹${Math.round(i.amount_expected || 0).toLocaleString('en-IN')}` : i.title}</span><span class="pill pill-${st === 'done' ? 'good' : st === 'partial' ? 'warn' : st ? 'crit' : 'ink'}">${st === 'done' ? 'Done' : st === 'partial' ? 'Partly' : st === 'blocked' ? 'Blocked' : st === 'not_done' ? 'Not done' : 'To do'}</span></li>`; })}</ul>
     ${when(dsrLines.length > 8, () => html`<p class="small muted" style="margin:6px 0 0">and ${dsrLines.length - 8} more</p>`)}</section>` : html``;
+  // ── Assigned to you: tasks, today's review lines, tickets and board items, with Start on each ──
+  const wk = d.work; const cur = wk?.current || null;
+  const assigned = wk && (wk.pending.length || cur) ? html`<section class="card reveal"><div class="card-head"><h2>Assigned to you</h2><a class="small" href="/tasks">${wk.pending.length > 6 ? `All ${wk.pending.length}` : 'My work'}</a></div>
+    ${when(cur, () => html`<p class="small" style="margin:2px 0 8px">${cur!.kind === 'break' ? pill('On a break', 'warn') : pill('Working now', 'good')} <b>${cur!.title}</b> since ${fmtTime(cur!.started_at)}</p>`)}
+    ${wk.pending.length ? html`<ul class="list" style="margin-top:4px">${wk.pending.slice(0, 6).map((p) => { const on = !!cur && cur.entity_type === p.type && cur.entity_id === p.id; return html`<li style="display:flex;gap:10px;align-items:center"><span style="flex:1;min-width:0"><b style="display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.title}</b><span class="small ${p.overdue ? 'c-crit' : 'muted'}">${WORK_TYPE_LABEL[p.type]}${when(p.from, () => html` · from ${p.from}`)}${when(p.due, () => html` · ${p.overdue ? 'overdue' : 'due'} ${fmtDate(p.due)}`)}</span></span>${on ? html`` : html`<button class="btn btn-sm" type="button" data-post="/work/start" data-body='${JSON.stringify({ type: p.type, id: p.id })}'>${p.minutes ? 'Continue' : 'Start'}</button>`}</li>`; })}</ul>` : html`<p class="small muted" style="margin:0">Nothing else is waiting for you.</p>`}</section>` : html``;
   const waiting = d.approvals.length + d.alerts.length;
 
 
@@ -174,7 +182,7 @@ export function todayPage(v: View, d: TodayData): Raw {
             action: can(v.app.db, v.user, 'reports.company') ? button('Look at the company page', { href: '/company', size: 'sm' }) : button('Open the daily review', { href: '/dsr', size: 'sm' })
           })))}
         </div>
-        <div class="col-side">${myDay}${apps}${notes}${requests}${leave}</div>
+        <div class="col-side">${assigned}${myDay}${apps}${notes}${requests}${leave}</div>
       </div>`
   });
 }

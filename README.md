@@ -15,7 +15,7 @@ npm run demo          # starts http://localhost:3000 with sample data
 
 Windows: double-click `scripts\start-laptop.cmd`. macOS/Linux: `scripts/start-laptop.sh`.
 
-Sign in with any employee's work email and the starter password `Welcome@LoyalFlow1` (first names and surnames as in the employee master, e.g. `sridhar.narayanagowda@loyalstring.com`, `prasad.panchal@loyalstring.com`, `alpesh.boda@loyalstring.com`, `lukman.nishad@loyalstring.com`, `nikita.kakade@loyalstring.com`).
+Sign in with any employee's work email and the starter password `Welcome@LoyalFlow1` (first names and surnames as in the employee master, e.g. `sridhar.ngowda@loyalstring.com`, `prasad.panchal@loyalstring.com`, `alpesh.boda@loyalstring.com`, `lukman.nishad@loyalstring.com`, `nikita.kakade@loyalstring.com`).
 
 With demo data on (`LOYALFLOW_DEMO=1`) nobody is forced to change the starter password and emails are printed to the terminal instead of being sent. For the real system set `LOYALFLOW_DEMO=0` (see `.env.example`): then every employee must set their own password at first sign-in and mail goes through Microsoft 365.
 
@@ -57,7 +57,7 @@ node --no-warnings=ExperimentalWarning scripts/reset-password.ts
 That lists every account and shows which are locked. Run it again with an email to put that account back to the starter password and clear the lock:
 
 ```
-node --no-warnings=ExperimentalWarning scripts/reset-password.ts sridhar.narayanagowda@loyalstring.com
+node --no-warnings=ExperimentalWarning scripts/reset-password.ts sridhar.ngowda@loyalstring.com
 ```
 
 Add a password of your own on the end to set that instead. Deleting the `data` folder also works, but it throws away everything in the system.

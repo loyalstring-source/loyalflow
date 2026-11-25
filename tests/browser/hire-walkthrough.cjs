@@ -40,7 +40,7 @@ const ok = (cond, label, extra = '') => { console.log(`${cond ? 'ok  ' : 'FAIL'}
   const posted = (label) => ok(last().status === 200, label, `→ ${last().status} ${last().url} sent=${last().sent.slice(0, 120)} got=${last().body.slice(0, 160)}`);
 
   await p.goto(BASE + '/login');
-  await p.fill('input[name=email]', 'sridhar.narayanagowda@loyalstring.com'); await p.fill('input[name=password]', PW);
+  await p.fill('input[name=email]', 'sridhar.ngowda@loyalstring.com'); await p.fill('input[name=password]', PW);
   await p.click('button[type=submit]'); await p.waitForURL(BASE + '/');
 
   // 1. New vacancy

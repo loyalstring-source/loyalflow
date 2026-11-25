@@ -1,7 +1,7 @@
 import type { Page } from 'playwright/test';
 
 export const PASSWORD = 'Welcome@LoyalFlow1';
-export const COO = 'sridhar.narayanagowda@loyalstring.com';
+export const COO = 'sridhar.ngowda@loyalstring.com';
 export const SUPPORT_LEAD = 'prasad.panchal@loyalstring.com';
 export const SUPPORT_IC = 'nikita.kakade@loyalstring.com';
 export const BDM = 'alpesh.boda@loyalstring.com';

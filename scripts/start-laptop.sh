@@ -9,5 +9,5 @@ if [ "$NODE_MAJOR" -lt 22 ]; then echo "Node 22 or newer is required (you have $
 export LOYALFLOW_DEMO=${LOYALFLOW_DEMO:-1}
 export PORT=${PORT:-3000}
 echo "Starting LoyalFlow on http://localhost:$PORT (demo data: $LOYALFLOW_DEMO)"
-echo "Sign in as sridhar.narayanagowda@loyalstring.com / Welcome@LoyalFlow1"
+echo "Sign in as sridhar.ngowda@loyalstring.com / Welcome@LoyalFlow1"
 node --no-warnings=ExperimentalWarning src/server.ts
