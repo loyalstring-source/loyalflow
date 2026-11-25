@@ -3,7 +3,8 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { startServer, Client, type TestServer, testApp, emp, COO, BDM, SUPPORT_IC } from '../helpers.ts';
 import { decideTask } from '../../src/modules/tasks/service.ts';
-import { submitClaim, getClaim, markPaid, settleAdvance, advanceState, addDoc, readDoc, listDocs, ledger, balanceOf, accountsDesk, isAccounts, canSee } from '../../src/modules/money/service.ts';
+import { submitClaim, getClaim, markPaid, settleAdvance, advanceState, addDoc, readDoc, listDocs, ledger, balanceOf, accountsDesk, isAccounts, canSee,
+  saveLimits, limitFor, addVendorBill, pettyTopUp, pettySpend, pettyBalance, closeMonth, reopenMonth, isClosed, markPosted, months, booksExport, advanceReminders, saveMoneySettings, moneySettings } from '../../src/modules/money/service.ts';
 import { measures, today } from '../../src/modules/brief/service.ts';
 import type { App } from '../../src/app.ts';
 import type { Employee } from '../../src/modules/people/model.ts';
@@ -100,5 +101,98 @@ describe('expenses in the browser', () => {
     assert.match(await (await bdm.get('/money/ledger')).text(), /Reimbursement paid/); assert.match(await (await coo.get('/money/ledger')).text(), /Everyone/);
     for (const r of ['fin-ledger', 'fin-payables', 'fin-advances', 'fin-cash-out']) { assert.equal((await acc.get(`/reports/${r}`)).status, 200, r); assert.equal((await coo.get(`/reports/${r}.xlsx`)).status, 200, r); assert.equal((await out.get(`/reports/${r}`)).status, 403, r); }
     assert.match(await (await coo.get('/reports/fin-ledger?from=2020-01-01')).text(), /UPI998877/);
+  });
+});
+
+describe('limits, vendor bills, petty cash, GST, reminders and month close', () => {
+  test('a limit flags a claim above it and tells the approver; with no limit set nothing is flagged', () => {
+    const app = testApp(); const bdm = emp(app, BDM); const acc = emp(app, ACC);
+    assert.equal(submitClaim(app, bdm, { category: 'Food', amount: 9000, description: 'Team dinner' }).over_limit, null);
+    assert.throws(() => saveLimits(app, bdm, { Food: 1500 }), /Accounts or an executive/); assert.throws(() => saveLimits(app, acc, { Food: -5 }), /above zero/);
+    assert.equal(saveLimits(app, acc, { Food: 1500, Travel: '' }), 1); assert.equal(limitFor(app, 'Food'), 1500);
+    const over = submitClaim(app, bdm, { category: 'Food', amount: 2400, description: 'Customer dinner' }); assert.equal(over.over_limit, 1500);
+    assert.match(app.db.get<{ title: string }>('SELECT title FROM tasks WHERE id = ?', [over.task_id])!.title, /above the ₹1,500 limit for Food/);
+    assert.equal(submitClaim(app, bdm, { category: 'Food', amount: 1500, description: 'Lunch' }).over_limit, null);
+    assert.equal(submitClaim(app, bdm, { kind: 'advance', category: 'Food', amount: 5000, description: 'Event catering advance' }).over_limit, null, 'limits are for bills, not advances');
+    saveLimits(app, acc, { Food: '' }); assert.equal(limitFor(app, 'Food'), null);
+  });
+  test('GST on a bill needs a valid GSTIN and is less than the bill', () => {
+    const app = testApp(); const bdm = emp(app, BDM);
+    assert.throws(() => submitClaim(app, bdm, { category: 'Travel', amount: 1180, description: 'Hotel', vendorGstin: 'ABC', gstAmount: 180 }), /does not look right/);
+    assert.throws(() => submitClaim(app, bdm, { category: 'Travel', amount: 1180, description: 'Hotel', gstAmount: 180 }), /supplier's GSTIN/);
+    assert.throws(() => submitClaim(app, bdm, { category: 'Travel', amount: 1180, description: 'Hotel', vendorGstin: '27AAACH1234A1Z5', gstAmount: 1180 }), /less than the bill/);
+    const c = submitClaim(app, bdm, { category: 'Travel', amount: 1180, description: 'Hotel', vendorName: 'Hotel Sai', vendorGstin: '27aaach1234a1z5', billNo: 'H-22', gstAmount: 180 });
+    assert.deepEqual([c.vendor_name, c.vendor_gstin, c.bill_no, c.gst_amount], ['Hotel Sai', '27AAACH1234A1Z5', 'H-22', 180]);
+  });
+  test('a vendor bill is entered by Accounts, approved, paid, and never touches an employee\'s balance', () => {
+    const app = testApp(); const acc = emp(app, ACC); const bdm = emp(app, BDM); const before = balanceOf(app, acc.id);
+    assert.throws(() => addVendorBill(app, bdm, { vendorName: 'X Ltd', amount: 100, description: 'Paper' }), /entered by Accounts/); assert.throws(() => addVendorBill(app, acc, { amount: 100, description: 'Paper' }), /vendor's name/);
+    const v = addVendorBill(app, acc, { vendorName: 'Bhosari Electricals', vendorGstin: '27AAACB1111C1Z9', amount: 5900, gstAmount: 900, description: 'UPS battery', category: 'Office supplies', doc: PNG, docName: 'inv.png' });
+    assert.equal(v.kind, 'vendor'); assert.equal(v.status, 'pending'); approve(app, v.id);
+    assert.ok(accountsDesk(app).toPay.some((x) => x.id === v.id)); assert.equal(balanceOf(app, acc.id), before);
+    const paid = markPaid(app, acc, v.id, pay); assert.equal(paid.status, 'paid'); assert.equal(balanceOf(app, acc.id), before);
+    assert.deepEqual(ledger(app, { party: 'vendor' }).filter((e) => e.expense_id === v.id).map((e) => [e.type, e.debit, e.credit, e.employee_name]), [['vendor_bill', 0, 5900, 'Bhosari Electricals'], ['vendor_paid', 5900, 0, 'Bhosari Electricals']]);
+    assert.ok(!canSee(app, bdm, getClaim(app, v.id)!), 'a vendor bill is for Accounts and the approver');
+  });
+  test('petty cash: topped up, paid from within the cap, and never more than is in the box', () => {
+    const app = testApp(); const acc = emp(app, ACC); const bdm = emp(app, BDM); const start = pettyBalance(app);
+    assert.throws(() => pettyTopUp(app, bdm, { amount: 100 }), /kept by Accounts/);
+    assert.equal(pettyTopUp(app, acc, { amount: 3000, mode: 'Cash withdrawn from bank', ref: 'CHQ 1001' }), start + 3000);
+    assert.throws(() => pettySpend(app, acc, { amount: 2500, description: 'Too big' }), /at most ₹2,000/);
+    const p = pettySpend(app, acc, { amount: 450, description: 'Courier', category: 'Courier', vendorName: 'Quick Courier' }); assert.deepEqual([p.kind, p.status, p.pay_mode], ['petty', 'paid', 'Petty cash']); assert.equal(pettyBalance(app), start + 2550);
+    saveMoneySettings(app, acc, { pettyCap: 50000 }); assert.equal(moneySettings(app).pettyCap, 50000);
+    assert.throws(() => pettySpend(app, acc, { amount: start + 9000, description: 'More than the box' }), /Add cash first/);
+    assert.throws(() => markPaid(app, acc, p.id, pay), /paid when it is entered/);
+  });
+  test('a closed month takes no more lines; only an executive reopens it', () => {
+    const app = testApp(); const acc = emp(app, ACC); const coo = emp(app, COO); const bdm = emp(app, BDM); const now = today(); const cur = now.slice(0, 7);
+    const d = new Date(`${cur}-01T00:00:00Z`); d.setUTCMonth(d.getUTCMonth() - 1); const last = d.toISOString().slice(0, 7);
+    assert.throws(() => closeMonth(app, acc, cur), /after it has ended/); assert.throws(() => closeMonth(app, bdm, last), /closed by Accounts/);
+    closeMonth(app, acc, last); assert.ok(isClosed(app, `${last}-15`)); assert.ok(months(app).find((m) => m.month === last)!.closed_at);
+    const c = submitClaim(app, bdm, { category: 'Travel', amount: 700, description: 'Bus fare', doc: PNG, docName: 'b.png' }); approve(app, c.id);
+    assert.throws(() => markPaid(app, acc, c.id, { mode: 'Cash', date: `${last}-20` }), /books for .* are closed/);
+    assert.throws(() => pettyTopUp(app, acc, { amount: 500, date: `${last}-20` }), /are closed/);
+    assert.throws(() => reopenMonth(app, acc, last), /executive or an administrator/); reopenMonth(app, coo, last); assert.ok(!isClosed(app, `${last}-15`));
+    assert.equal(markPaid(app, acc, c.id, { mode: 'Cash', date: `${last}-20` }).status, 'paid');
+    markPosted(app, acc, last, true); assert.ok(months(app).find((m) => m.month === last)!.posted_at); markPosted(app, acc, last, false); assert.equal(months(app).find((m) => m.month === last)!.posted_at, null);
+  });
+  test('the file for Zoho Books lists expenses booked in the month, not advances', () => {
+    const app = testApp(); const acc = emp(app, ACC); const bdm = emp(app, BDM); const month = today().slice(0, 7);
+    const c = submitClaim(app, bdm, { category: 'Travel', amount: 1180, description: 'Hotel, one night', vendorName: 'Hotel Sai', vendorGstin: '27AAACH1234A1Z5', billNo: 'H-22', gstAmount: 180 }); approve(app, c.id);
+    const a = submitClaim(app, bdm, { kind: 'advance', category: 'Travel', amount: 4000, description: 'Trip' }); approve(app, a.id); markPaid(app, acc, a.id, { mode: 'Cash' });
+    const s = submitClaim(app, bdm, { kind: 'settlement', advanceId: a.id, amount: 2500, description: 'Fuel for the trip' }); approve(app, s.id);
+    const x = booksExport(app, month); const row = (id: string) => x.rows.find((r) => r[8] === id);
+    assert.equal(x.columns[0], 'Expense Date'); assert.deepEqual(row(c.id)!.slice(1, 8), ['Travel', 1180, 180, 'Employee Reimbursements', 'Hotel Sai', '27AAACH1234A1Z5', 'H-22']);
+    assert.deepEqual([row(s.id)![2], row(s.id)![4], row(s.id)![9]], [2500, 'Employee Advance', 'Fuel for the trip']); assert.equal(row(a.id), undefined);
+  });
+  test('an advance open too long reminds the person and their manager, then waits a week', () => {
+    const app = testApp(); const acc = emp(app, ACC); const bdm = emp(app, BDM);
+    const a = submitClaim(app, bdm, { kind: 'advance', category: 'Travel', amount: 6000, description: 'Exhibition' }); approve(app, a.id); markPaid(app, acc, a.id, { mode: 'Cash' });
+    const count = (): number => app.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM notifications WHERE title = ?', [`Settle your advance ${a.id}`])!.n;
+    advanceReminders(app); assert.equal(count(), 0, 'not yet due');
+    app.db.run('UPDATE expenses SET paid_at = ? WHERE id = ?', [new Date(Date.now() - 20 * 86_400_000).toISOString(), a.id]);
+    assert.ok(advanceReminders(app) >= 1); assert.equal(count(), 1);
+    assert.ok(app.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM notifications WHERE employee_id = ? AND title LIKE 'Advance not settled:%'", [bdm.reporting_manager_id])!.n >= 1);
+    advanceReminders(app); assert.equal(count(), 1, 'not again within a week');
+    advanceReminders(app, new Date(Date.now() + 8 * 86_400_000)); assert.equal(count(), 2);
+  });
+});
+
+describe('the new Accounts screens', () => {
+  let s: TestServer; before(async () => { s = await startServer(); }); after(async () => { await s.close(); });
+  const login = async (email: string): Promise<Client> => { const c = new Client(s.base); await c.login(email); return c; };
+  test('Accounts opens them and saves; others cannot', async () => {
+    const acc = await login(ACC); const bdm = await login(BDM); const month = today().slice(0, 7);
+    const desk = await (await acc.get('/money/accounts')).text(); for (const t of ['Month close', 'Vendor bill', 'Petty cash', 'Limits and reminders', 'File for Zoho']) assert.match(desk, new RegExp(t), t);
+    for (const u of ['/money/vendor/new', '/money/petty', '/money/settings']) { assert.equal((await acc.get(u + '?partial=1')).status, 200, u); assert.equal((await bdm.get(u)).status, 403, u); }
+    assert.equal((await acc.postJson('/money/settings', { 'limit:Food': 1200, advanceDays: 10, pettyCap: 3000 })).status, 200); assert.equal(limitFor(s.app, 'Food'), 1200); assert.deepEqual(moneySettings(s.app), { advanceDays: 10, pettyCap: 3000 });
+    assert.equal((await acc.postJson('/money/petty/topup', { amount: 2000, mode: 'Cheque', ref: 'CHQ 77' })).status, 200);
+    assert.equal((await acc.postJson('/money/petty/spend', { amount: 300, description: 'Tea for visitors', category: 'Food' })).status, 200);
+    assert.equal((await acc.postJson('/money/vendor', { vendorName: 'Pune Broadband', amount: 1180, gstAmount: 180, vendorGstin: '27AABCP5678B1Z2', description: 'Internet for the month' })).status, 200);
+    assert.equal((await bdm.postJson('/money/petty/spend', { amount: 10, description: 'No' })).status, 403); assert.equal((await bdm.postJson('/money/months/close', { month: '2026-01' })).status, 403);
+    const csv = await acc.get(`/money/books.csv?month=${month}`); assert.equal(csv.status, 200); assert.match(csv.headers.get('content-type') || '', /text\/csv/); assert.match(await csv.text(), /Expense Date,Expense Account/);
+    assert.equal((await bdm.get(`/money/books.csv?month=${month}`)).status, 403);
+    assert.equal((await acc.get('/reports/fin-gst-input')).status, 200); assert.equal((await acc.get('/reports/fin-gst-input.xlsx')).status, 200);
+    assert.match(await (await bdm.get('/money/new?kind=reimbursement&partial=1')).text(), /Supplier GSTIN/);
   });
 });

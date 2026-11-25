@@ -217,6 +217,21 @@ export function seedDemoExtras(app: App, now = new Date()): void {
       adv(sales[2], 15000, 'Travel', 'Customer visits in Hyderabad next week', 1, 'approved');
       const a4 = adv(sup[0], 12000, 'Travel', 'Implementation trip to Nashik', 40, 'paid'); bills(sup[0], a4, 10650, 'Travel', 'Bus, lodge and meals', 33);
       if (a4 && sup[0]) { const day = localDateString(addDays(now, -31)); line(sup[0].id, a4, day, 'advance_returned', 0, 1350, 'Cash', ''); db.run("UPDATE expenses SET status = 'settled', settled_at = ? WHERE id = ?", [`${day}T07:00:00.000Z`, a4]); }
+      // Petty cash, and vendor bills: one paid, one waiting.
+      const pline = (date: string, type: string, debit: number, credit: number, exp: string | null, note: string, mode = ''): void => { db.run('INSERT INTO expense_ledger (employee_id, expense_id, entry_date, type, debit, credit, mode, ref, note, created_by, created_at, party) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [acc?.id || coo.id, exp, date, type, debit, credit, mode, '', note, acc?.id || null, `${date}T08:00:00.000Z`, type.startsWith('vendor') ? 'vendor' : 'petty']); };
+      const other = (kind: string, daysAgo: number, vendor: string, gstin: string, category: string, amount: number, gst: number | null, what: string, status: string, dept: string): string => {
+        const id = db.nextId('E'); const day = localDateString(addDays(now, -daysAgo)); const paid = status === 'paid';
+        db.run('INSERT INTO expenses (id, employee_id, category, amount, description, status, created_at, kind, expense_date, department_id, vendor_name, vendor_gstin, bill_no, gst_amount, paid_at, paid_by, pay_mode, pay_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [id, acc?.id || coo.id, category, amount, what, status, `${day}T05:00:00.000Z`, kind, day, deptId(dept) || null, vendor, gstin, `INV-${Math.floor(1000 + rand() * 8999)}`, gst, paid ? `${day}T06:30:00.000Z` : null, paid ? acc?.id || null : null, paid ? (kind === 'petty' ? 'Petty cash' : 'Bank transfer') : '', paid && kind !== 'petty' ? `NEFT${Math.floor(100000 + rand() * 899999)}` : '']);
+        if (kind === 'petty') pline(day, 'petty_spend', 0, amount, id, category, 'Petty cash'); else { pline(day, 'vendor_bill', 0, amount, id, category); if (paid) pline(day, 'vendor_paid', amount, 0, id, '', 'Bank transfer'); }
+        return id;
+      };
+      pline(localDateString(addDays(now, -20)), 'petty_topup', 10000, 0, null, '', 'Cash withdrawn from bank');
+      other('petty', 14, 'Sai Stationers', '', 'Office supplies', 640, null, 'Printer paper and pens', 'paid', 'ACC');
+      other('petty', 8, 'Shree Tea Stall', '', 'Food', 380, null, 'Tea and snacks for visitors', 'paid', 'ACC');
+      other('petty', 3, 'Quick Courier', '', 'Courier', 450, null, 'Sample tags to a customer', 'paid', 'SAL');
+      other('vendor', 18, 'Zebra Labels India Pvt Ltd', '27AAACZ1234A1Z5', 'Office supplies', 47200, 7200, 'RFID label rolls, 20 boxes', 'paid', 'PRD');
+      other('vendor', 2, 'Pune Broadband Services', '27AABCP5678B1Z2', 'Other', 11800, 1800, 'Office internet, November', 'approved', 'ACC');
     }
 
   });

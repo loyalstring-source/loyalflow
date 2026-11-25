@@ -132,7 +132,7 @@ export function budgets(app: App, fy = fiscalYear(new Date())): BudgetLine[] {
   const { start, end } = fyBounds(fy);
   return listDepartments(app.db).filter((d) => d.code !== 'LEAD').map((d) => {
     const row = app.db.get<{ amount: number; notes: string }>('SELECT amount, notes FROM budgets WHERE department_id = ? AND fiscal_year = ?', [d.id, fy]);
-    const spent = app.db.get<{ n: number }>("SELECT COALESCE(SUM(x.amount),0) AS n FROM expenses x JOIN employees e ON e.id = x.employee_id WHERE e.department_id = ? AND x.status IN ('approved', 'paid') AND x.kind <> 'advance' AND x.created_at >= ? AND x.created_at < ?", [d.id, start, end])?.n || 0;
+    const spent = app.db.get<{ n: number }>("SELECT COALESCE(SUM(x.amount),0) AS n FROM expenses x JOIN employees e ON e.id = x.employee_id WHERE COALESCE(x.department_id, e.department_id) = ? AND x.status IN ('approved', 'paid') AND x.kind <> 'advance' AND x.created_at >= ? AND x.created_at < ?", [d.id, start, end])?.n || 0;
     const purchases = app.db.get<{ n: number }>("SELECT COALESCE(SUM(t.amount),0) AS n FROM tasks t JOIN employees e ON e.id = t.requester_id WHERE t.type = 'purchase' AND e.department_id = ? AND t.status = 'approved' AND t.created_at >= ? AND t.created_at < ?", [d.id, start, end])?.n || 0;
     const committed = app.db.get<{ n: number }>("SELECT COALESCE(SUM(t.amount),0) AS n FROM tasks t JOIN employees e ON e.id = t.requester_id WHERE t.type IN ('purchase','expense') AND e.department_id = ? AND t.status = 'open' AND t.created_at >= ? AND t.created_at < ?", [d.id, start, end])?.n || 0;
     const amount = row?.amount || 0; const used = spent + purchases;

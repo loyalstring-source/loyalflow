@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.27.0 — 25 Nov 2026
+Accounts: limits, advance reminders, vendor bills, petty cash, GST on bills, month close and a file for Zoho Books.
+- **Spending limits per category (optional).** Accounts desk → Limits and reminders. One limit per category for a single claim. A claim above it still goes for approval, but it is marked "Above the limit" and the approver is told. No limits are set to begin with, so nothing is flagged until one is entered.
+- **Reminders on old advances.** When an advance has been open for 15 days (changeable), the person and their manager are reminded each morning it falls due, then every 7 days. If the person spent more than the advance, Accounts is reminded to pay the difference.
+- **Vendor bills.** Accounts enters a supplier's bill (vendor, GSTIN, bill number and date, amount, GST, which team it is charged to, and the bill itself). It is approved by amount like any expense, appears under "To pay", and is paid and recorded the same way. Vendor lines sit in the same ledger but never touch an employee's balance.
+- **Petty cash.** Accounts adds cash to the box and records small payments from it, each with a receipt. One payment is capped (₹2,000 unless changed) and cannot exceed what is in the box. The desk shows the cash in the box and each movement.
+- **GST details on bills.** Any claim, vendor bill or petty payment can carry the supplier's name, GSTIN, bill number and the GST amount. The GSTIN is checked for its form. New report: **GST on bills (input credit)**.
+- **Month close.** Accounts closes a month once it has ended; after that no ledger line can be dated in it. Only an executive or administrator can reopen it. The desk shows the last six months with lines, net cash out and expense booked.
+- **File for Zoho Books.** For each month Accounts downloads the expenses booked (claims, bills accepted against advances, vendor bills, petty cash) in the columns Zoho Books imports, and marks the month as posted so it is not imported twice. Direct posting through Zoho's API is not built yet; it needs the Zoho credentials.
+- "Money paid out, month by month" now includes vendors paid and petty cash; the ledger report shows whether a line is an employee's, a vendor's or petty cash; budgets charge a vendor bill or petty payment to the team it was entered against.
+
 ## 1.26.0 — 25 Nov 2026
 Expenses go on to Accounts: reimbursements, advances and advance settlements, with documents and a ledger.
 - **New tab: Home → Expenses.** Three things a person can raise: **Claim an expense** (reimbursement), **Ask for an advance**, and **Settle an advance** with bills. Each goes to the same approver as before (team lead, head of department or COO by amount).

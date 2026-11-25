@@ -1290,5 +1290,23 @@ CREATE INDEX idx_expense_ledger_claim ON expense_ledger(expense_id);
 INSERT INTO expense_ledger (employee_id, expense_id, entry_date, type, debit, credit, note, created_at)
   SELECT employee_id, id, date(created_at, '+330 minutes'), 'claim_approved', 0, amount, category, created_at FROM expenses WHERE status = 'approved';
 `
+  },
+  {
+    id: '0020_money_extras',
+    sql: `
+-- Vendor bills and petty cash sit in the same ledger; GST details on bills; limits, reminders and month close.
+ALTER TABLE expenses ADD COLUMN department_id TEXT REFERENCES departments(id);
+ALTER TABLE expenses ADD COLUMN vendor_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE expenses ADD COLUMN vendor_gstin TEXT NOT NULL DEFAULT '';
+ALTER TABLE expenses ADD COLUMN bill_no TEXT NOT NULL DEFAULT '';
+ALTER TABLE expenses ADD COLUMN gst_amount REAL;
+ALTER TABLE expenses ADD COLUMN over_limit REAL;
+ALTER TABLE expenses ADD COLUMN reminded_at TEXT;
+-- Whose account a ledger line belongs to: an employee, a vendor, or the petty-cash box.
+ALTER TABLE expense_ledger ADD COLUMN party TEXT NOT NULL DEFAULT 'employee';
+CREATE TABLE expense_limits (category TEXT PRIMARY KEY, per_claim REAL NOT NULL, updated_by TEXT REFERENCES employees(id), updated_at TEXT NOT NULL);
+CREATE TABLE ledger_months (month TEXT PRIMARY KEY, closed_at TEXT, closed_by TEXT REFERENCES employees(id), posted_at TEXT, posted_by TEXT REFERENCES employees(id));
+CREATE TABLE money_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+`
   }
 ];
