@@ -1,5 +1,6 @@
 import type { App } from '../../app.ts';
 import { stopItem, startWork, stopWork, openSession } from '../work/service.ts';
+import { expenseDecided } from '../money/service.ts';
 import { audit } from '../../lib/audit.ts';
 import { HttpError } from '../../lib/http.ts';
 import { getSetting, type ApprovalRule } from '../../lib/settings.ts';
@@ -115,7 +116,7 @@ export function decideTask(app: App, actor: Employee, id: string, decision: 'app
     audit(app.db, { entity: 'task', entityId: id, action: decision, actorId: actor.id, after: { note } });
     const p = payloadOf<{ leaveId?: string; expenseId?: string; dealId?: string }>(t);
     if (t.type === 'leave' && p.leaveId) leaveDecision(app, actor, t, p.leaveId, decision, note, nowIso);
-    if (t.type === 'expense' && p.expenseId) app.db.run('UPDATE expenses SET status = ? WHERE id = ?', [decision, p.expenseId]);
+    if (t.type === 'expense' && p.expenseId) { app.db.run('UPDATE expenses SET status = ? WHERE id = ?', [decision, p.expenseId]); expenseDecided(app, actor, p.expenseId, decision); }
     if (t.type === 'discount' && p.dealId) app.db.run('UPDATE deals SET discount_status = ?, updated_at = ? WHERE id = ?', [decision, nowIso, p.dealId]);
   });
   if (t.requester_id && t.requester_id !== actor.id) {

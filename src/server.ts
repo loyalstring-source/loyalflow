@@ -25,6 +25,7 @@ import * as sales from './routes/sales.ts';
 import * as production from './routes/production.ts';
 import * as sops from './routes/sops.ts';
 import * as tasks from './routes/tasks.ts';
+import * as money from './routes/money.ts';
 import * as people from './routes/people.ts';
 import * as settings from './routes/settings.ts';
 import * as listsRoutes from './routes/lists.ts';
@@ -95,6 +96,7 @@ export function createServer(app: App, opts: { log?: (line: string) => void } = 
   production.register(auth, app);
   sops.register(auth, app);
   tasks.register(auth, app);
+  money.register(auth, app);
   people.register(auth, app);
   settings.register(auth, app);
   listsRoutes.register(auth, app);

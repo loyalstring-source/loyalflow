@@ -58,7 +58,7 @@ export function todayPage(v: View, d: TodayData): Raw {
   if (dept === 'SAL' || dept === 'PRE' || v.isManager) { actions.push(quickAction('Log a visit', 'pin', { modal: '/pipeline/activity?kind=visit' })); actions.push(quickAction('New lead', 'funnel', { modal: '/pipeline/new' })); }
   if (dept === 'PRD') actions.push(quickAction(v.lang === 'hi' ? 'उत्पादन बोर्ड' : 'Production board', 'factory', { href: '/production' }));
   actions.push(quickAction('Request leave', 'calendar', { modal: '/approvals/leave/new' }));
-  actions.push(quickAction('Claim expense', 'rupee', { modal: '/approvals/expense/new' }));
+  actions.push(quickAction('Claim expense', 'rupee', { modal: '/money/new?kind=reimbursement' }));
 
   const checkedIn = !!d.attendance?.check_in;
   const attendance = checkedIn

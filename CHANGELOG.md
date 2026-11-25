@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.26.0 — 25 Nov 2026
+Expenses go on to Accounts: reimbursements, advances and advance settlements, with documents and a ledger.
+- **New tab: Home → Expenses.** Three things a person can raise: **Claim an expense** (reimbursement), **Ask for an advance**, and **Settle an advance** with bills. Each goes to the same approver as before (team lead, head of department or COO by amount).
+- **After approval it goes to Accounts.** The Accounts team is notified and the item appears on the new **Accounts desk** under "To pay". Accounts records the payment with date, how it was paid (bank transfer, UPI, cash, cheque) and the transaction number, and can attach the payment proof. The item is then marked **Paid** and the person is told.
+- **Advances.** An approved advance is given by Accounts and stays open against the person. They submit bills against it; once approved, the bills reduce what they hold. Accounts records unspent money returned, or pays the difference when more was spent than advanced. The advance closes as **Settled** when the two sides match. A person may have at most three advances open.
+- **Supporting documents.** Bills, receipts and payment proofs (PDF or photo, up to 5 MB) attach to each claim, by the person or by Accounts. A reimbursement cannot be paid without a bill. The files are kept outside the public uploads folder and open only for the person, their managers, the approver and Accounts.
+- **Ledger.** Every amount approved, paid, advanced, accounted for or returned is one line, with how and the reference. Each person has a running balance: above zero they hold company money, below zero the company owes them. A recorded line cannot be edited.
+- **Nothing goes through payroll.** Reimbursements and advances are paid directly by Accounts and never appear on a payslip.
+- **Four reports for budgeting** (Reports → Finance, all export to Excel): Expense and advance ledger; Approved and waiting to be paid; Advances given, accounted for and outstanding; Money paid out month by month (reimbursements, advances, returns, net cash out, and expense booked).
+- **Spend figures corrected for advances:** an advance is not counted as spend until its bills are accepted. Budgets, the company overview and the expense reports follow this.
+- Claims approved before this version appear under "To pay" until Accounts marks them paid.
+
 ## 1.25.0 — 25 Nov 2026
 Drag and drop on the boards, assigned work on the home page, and the COO's new email.
 - **Drag and drop on the Support and Development boards.** Drag a ticket or a board item to another column to move it. A small box asks for an optional remark and then moves it. The remark is kept on the ticket's history or the item's comments.

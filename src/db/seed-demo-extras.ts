@@ -188,5 +188,36 @@ export function seedDemoExtras(app: App, now = new Date()): void {
       }
     }
 
+    // ---- Expenses on to Accounts: older approved claims are paid, with ledger lines; a few advances in different states ----
+    if (!db.get("SELECT id FROM expense_ledger WHERE type <> 'claim_approved' LIMIT 1")) {
+      const acc = team('ACC')[0]; const line = (emp: string, exp: string, date: string, type: string, debit: number, credit: number, mode = '', ref = '', note = ''): void => { db.run('INSERT INTO expense_ledger (employee_id, expense_id, entry_date, type, debit, credit, mode, ref, note, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [emp, exp, date, type, debit, credit, mode, ref, note, acc?.id || null, `${date}T08:00:00.000Z`]); };
+      const old = db.all<{ id: string; employee_id: string; amount: number; category: string; created_at: string }>("SELECT id, employee_id, amount, category, created_at FROM expenses WHERE status = 'approved' AND kind = 'reimbursement' ORDER BY created_at");
+      for (const x of old) {
+        const day = x.created_at.slice(0, 10); if (!db.get("SELECT 1 AS x FROM expense_ledger WHERE expense_id = ? AND type = 'claim_approved'", [x.id])) line(x.employee_id, x.id, day, 'claim_approved', 0, x.amount, '', '', x.category);
+        if (day > localDateString(addDays(now, -6))) continue;   // the last few days are still waiting for Accounts
+        const paid = localDateString(addDays(new Date(`${day}T06:00:00.000Z`), 2 + Math.floor(rand() * 3))); const mode = pick(['Bank transfer', 'UPI', 'Bank transfer']); const ref = `${mode === 'UPI' ? 'UPI' : 'NEFT'}${Math.floor(100000 + rand() * 899999)}`;
+        line(x.employee_id, x.id, paid, 'claim_paid', x.amount, 0, mode, ref);
+        db.run("UPDATE expenses SET status = 'paid', paid_at = ?, paid_by = ?, pay_mode = ?, pay_ref = ?, expense_date = ? WHERE id = ?", [`${paid}T06:30:00.000Z`, acc?.id || null, mode, ref, day, x.id]);
+      }
+      const sales = team('SAL'); const sup = team('SUP');
+      const adv = (emp: Employee | undefined, amount: number, category: string, what: string, daysAgo: number, status: string): string | null => {
+        if (!emp) return null; const id = db.nextId('E'); const day = localDateString(addDays(now, -daysAgo));
+        const ref = `NEFT${Math.floor(100000 + rand() * 899999)}`;
+        db.run('INSERT INTO expenses (id, employee_id, category, amount, description, status, created_at, kind, expense_date, paid_at, paid_by, pay_mode, pay_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [id, emp.id, category, amount, what, status, `${day}T05:00:00.000Z`, 'advance', day, status === 'approved' ? null : `${day}T06:30:00.000Z`, status === 'approved' ? null : acc?.id || null, status === 'approved' ? '' : 'Bank transfer', status === 'approved' ? '' : ref]);
+        if (status !== 'approved') line(emp.id, id, day, 'advance_paid', amount, 0, 'Bank transfer', ref);
+        return id;
+      };
+      const bills = (emp: Employee | undefined, advId: string | null, amount: number, category: string, what: string, daysAgo: number): void => {
+        if (!emp || !advId) return; const id = db.nextId('E'); const day = localDateString(addDays(now, -daysAgo));
+        db.run('INSERT INTO expenses (id, employee_id, category, amount, description, status, created_at, kind, expense_date, advance_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [id, emp.id, category, amount, what, 'approved', `${day}T05:00:00.000Z`, 'settlement', day, advId]);
+        line(emp.id, advId, day, 'settlement_approved', 0, amount, '', '', `${category} · ${id}`);
+      };
+      const a1 = adv(sales[1], 25000, 'Travel', 'Exhibition visit to Jaipur, three days', 16, 'paid'); bills(sales[1], a1, 18400, 'Travel', 'Train, hotel and local travel', 9);
+      adv(sup[2], 8000, 'Travel', 'On-site installation at Solapur', 4, 'paid');
+      adv(sales[2], 15000, 'Travel', 'Customer visits in Hyderabad next week', 1, 'approved');
+      const a4 = adv(sup[0], 12000, 'Travel', 'Implementation trip to Nashik', 40, 'paid'); bills(sup[0], a4, 10650, 'Travel', 'Bus, lodge and meals', 33);
+      if (a4 && sup[0]) { const day = localDateString(addDays(now, -31)); line(sup[0].id, a4, day, 'advance_returned', 0, 1350, 'Cash', ''); db.run("UPDATE expenses SET status = 'settled', settled_at = ? WHERE id = ?", [`${day}T07:00:00.000Z`, a4]); }
+    }
+
   });
 }

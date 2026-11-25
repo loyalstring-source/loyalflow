@@ -33,6 +33,7 @@ export const MODULE_NAME: Record<ModuleId, string> = { sales: 'Sales', support: 
 /** Which menu module each group of reports sits under. */
 export const MENU_OF: Record<ModuleId, string> = { sales: 'sales', support: 'support', dev: 'dev', production: 'production', finance: 'company', attendance: 'people', hiring: 'people', appraisals: 'people', sops: 'company', approvals: 'company', dsr: 'company', admin: 'admin' };
 
+import { ledger, advanceState, isAccounts, ENTRY_LABEL } from '../money/service.ts';
 // ---------- helpers ----------
 const TZ = "'+330 minutes'";
 const ld = (col: string): string => `date(${col}, ${TZ})`;          // a stored UTC time as a local date
@@ -252,16 +253,59 @@ export const REPORTS: ReportDef[] = [
   { key: 'fin-expenses-category', module: 'finance', title: 'Expenses by category', about: 'Expense claims raised in the period, by category.', filters: ['department', 'person'], allowed: managerOrAbove,
     run(app, c) {
       const p: Params = [c.from, c.to]; const w = who(c, 'x.employee_id', p);
-      const rows = app.db.all<{ cat: string; n: number; ok: number; pend: number; dec: number }>(`SELECT x.category AS cat, COUNT(*) AS n, COALESCE(SUM(CASE WHEN x.status = 'approved' THEN x.amount ELSE 0 END), 0) AS ok, COALESCE(SUM(CASE WHEN x.status = 'pending' THEN x.amount ELSE 0 END), 0) AS pend, COALESCE(SUM(CASE WHEN x.status = 'declined' THEN x.amount ELSE 0 END), 0) AS dec FROM expenses x WHERE ${ld('x.created_at')} BETWEEN ? AND ?${w} GROUP BY 1 ORDER BY ok DESC`, p).map((r): Cell[] => [r.cat, r.n, Math.round(r.ok), Math.round(r.pend), Math.round(r.dec)]);
+      const rows = app.db.all<{ cat: string; n: number; ok: number; pend: number; dec: number }>(`SELECT x.category AS cat, COUNT(*) AS n, COALESCE(SUM(CASE WHEN x.status IN ('approved', 'paid') THEN x.amount ELSE 0 END), 0) AS ok, COALESCE(SUM(CASE WHEN x.status = 'pending' THEN x.amount ELSE 0 END), 0) AS pend, COALESCE(SUM(CASE WHEN x.status = 'declined' THEN x.amount ELSE 0 END), 0) AS dec FROM expenses x WHERE x.kind <> 'advance' AND ${ld('x.created_at')} BETWEEN ? AND ?${w} GROUP BY 1 ORDER BY ok DESC`, p).map((r): Cell[] => [r.cat, r.n, Math.round(r.ok), Math.round(r.pend), Math.round(r.dec)]);
       return { columns: [{ header: 'Category' }, { header: 'Claims', fmt: 'int' }, { header: 'Approved', fmt: 'money' }, { header: 'Waiting', fmt: 'money' }, { header: 'Declined', fmt: 'money' }], rows, totals: ['Total', sum(rows, 1), sum(rows, 2), sum(rows, 3), sum(rows, 4)],
         chart: { title: 'Approved expenses by category', unit: '₹', labels: rows.map((r) => String(r[0])), values: rows.map((r) => Number(r[2])) } };
     } },
   { key: 'fin-expenses-person', module: 'finance', title: 'Expenses by person', about: 'Expense claims raised in the period, person by person, with kilometres claimed.', filters: ['department', 'person'], allowed: managerOrAbove,
     run(app, c) {
       const p: Params = [c.from, c.to]; const w = who(c, 'x.employee_id', p);
-      const rows = app.db.all<{ id: string; name: string; dept: string; n: number; ok: number; pend: number; km: number }>(`SELECT e.id, e.full_name AS name, d.name AS dept, COUNT(*) AS n, COALESCE(SUM(CASE WHEN x.status = 'approved' THEN x.amount ELSE 0 END), 0) AS ok, COALESCE(SUM(CASE WHEN x.status = 'pending' THEN x.amount ELSE 0 END), 0) AS pend, COALESCE(SUM(x.km), 0) AS km FROM expenses x JOIN employees e ON e.id = x.employee_id JOIN departments d ON d.id = e.department_id WHERE ${ld('x.created_at')} BETWEEN ? AND ?${w} GROUP BY e.id ORDER BY ok DESC`, p)
+      const rows = app.db.all<{ id: string; name: string; dept: string; n: number; ok: number; pend: number; km: number }>(`SELECT e.id, e.full_name AS name, d.name AS dept, COUNT(*) AS n, COALESCE(SUM(CASE WHEN x.status IN ('approved', 'paid') THEN x.amount ELSE 0 END), 0) AS ok, COALESCE(SUM(CASE WHEN x.status = 'pending' THEN x.amount ELSE 0 END), 0) AS pend, COALESCE(SUM(x.km), 0) AS km FROM expenses x JOIN employees e ON e.id = x.employee_id JOIN departments d ON d.id = e.department_id WHERE x.kind <> 'advance' AND ${ld('x.created_at')} BETWEEN ? AND ?${w} GROUP BY e.id ORDER BY ok DESC`, p)
         .map((r): Cell[] => [link(r.name, `/people/${r.id}`), r.dept, r.n, Math.round(r.ok), Math.round(r.pend), Math.round(r.km)]);
       return { columns: [{ header: 'Person', fmt: 'link' }, { header: 'Department' }, { header: 'Claims', fmt: 'int' }, { header: 'Approved', fmt: 'money' }, { header: 'Waiting', fmt: 'money' }, { header: 'Kilometres', fmt: 'int' }], rows, totals: ['Total', null, sum(rows, 2), sum(rows, 3), sum(rows, 4), sum(rows, 5)] };
+    } },
+  { key: 'fin-ledger', module: 'finance', title: 'Expense and advance ledger', about: 'Every line in the ledger for the period: expenses approved, reimbursements paid, advances given, bills accepted against an advance, unspent advance returned. Each line shows how it was paid, the reference, and the person\'s balance after it.', filters: ['department', 'person'], allowed: (app, u) => managerOrAbove(app, u) || isAccounts(app, u),
+    run(app, c) {
+      const TYPE: Record<string, string> = ENTRY_LABEL; const depts = c.departmentId ? new Set(app.db.all<{ id: string }>('SELECT id FROM employees WHERE department_id = ?', [c.departmentId]).map((r) => r.id)) : null;
+      const docs = new Map(app.db.all<{ id: string; n: number }>('SELECT expense_id AS id, COUNT(*) AS n FROM expense_docs GROUP BY expense_id').map((r) => [r.id, r.n]));
+      const rows = ledger(app, { employeeId: c.personId || undefined, people: isAccounts(app, c.viewer) ? null : c.people, from: c.from, to: c.to }).filter((e) => !depts || depts.has(e.employee_id))
+        .map((e): Cell[] => [e.entry_date, { text: e.employee_name, href: `/money/ledger?person=${e.employee_id}` }, e.team, TYPE[e.type] || e.type, e.expense_id ? { text: e.expense_id, href: `/money/${e.expense_id}` } : null, e.category, e.debit || null, e.credit || null, e.mode || null, e.ref || null, e.expense_id ? docs.get(e.expense_id) || 0 : 0, e.balance ?? null]);
+      return { columns: [{ header: 'Date', fmt: 'date' }, { header: 'Person' }, { header: 'Team' }, { header: 'Entry' }, { header: 'Claim' }, { header: 'Category' }, { header: 'Paid to person', fmt: 'money' }, { header: 'Owed or accounted', fmt: 'money' }, { header: 'How paid' }, { header: 'Reference' }, { header: 'Documents', fmt: 'int' }, { header: 'Balance after', fmt: 'money' }], rows,
+        totals: ['Total', null, null, null, null, null, sum(rows, 6), sum(rows, 7), null, null, null, null],
+        note: 'Balance after: above zero, the person holds company money (an advance not yet accounted for); below zero, the company owes the person.' };
+    } },
+  { key: 'fin-payables', module: 'finance', title: 'Approved and waiting to be paid', about: 'Reimbursements and advances that are approved but not yet paid by Accounts, oldest first, with days waiting and whether a bill is attached. Not limited by the dates above.', filters: ['department', 'person'], noRange: true, allowed: (app, u) => managerOrAbove(app, u) || isAccounts(app, u),
+    run(app, c) {
+      const p: Params = []; const w = who({ ...c, people: isAccounts(app, c.viewer) ? null : c.people }, 'x.employee_id', p);
+      const rows = app.db.all<{ id: string; emp: string; name: string; team: string; kind: string; category: string; amount: number; at: string; bills: number }>(`SELECT x.id, e.id AS emp, e.full_name AS name, d.name AS team, x.kind, x.category, x.amount, COALESCE(t.decided_at, x.created_at) AS at, (SELECT COUNT(*) FROM expense_docs dd WHERE dd.expense_id = x.id AND dd.kind = 'bill') AS bills
+        FROM expenses x JOIN employees e ON e.id = x.employee_id JOIN departments d ON d.id = e.department_id LEFT JOIN tasks t ON t.id = x.task_id WHERE x.status = 'approved' AND x.kind IN ('reimbursement', 'advance')${w} ORDER BY at`, p)
+        .map((r): Cell[] => [{ text: r.id, href: `/money/${r.id}` }, r.name, r.team, r.kind === 'advance' ? 'Advance' : 'Reimbursement', r.category, Math.round(r.amount), r.at.slice(0, 10), Math.max(0, Math.floor((Date.now() - new Date(r.at).getTime()) / 86_400_000)), r.kind === 'advance' ? 'Not needed' : r.bills ? 'Yes' : 'No bill']);
+      const by = new Map<string, number>(); for (const r of rows) by.set(String(r[2]), (by.get(String(r[2])) || 0) + Number(r[5]));
+      return { columns: [{ header: 'Claim' }, { header: 'Person' }, { header: 'Team' }, { header: 'Kind' }, { header: 'Category' }, { header: 'Amount', fmt: 'money' }, { header: 'Approved on', fmt: 'date' }, { header: 'Days waiting', fmt: 'int' }, { header: 'Bill attached' }], rows,
+        totals: ['Total', null, null, null, null, sum(rows, 5), null, null, null], chart: by.size ? { title: 'Waiting to be paid, by team', unit: '₹', labels: [...by.keys()], values: [...by.values()] } : undefined };
+    } },
+  { key: 'fin-advances', module: 'finance', title: 'Advances: given, accounted for and outstanding', about: 'Every advance given in the period: the amount, bills accepted against it, money returned, what is still with the person, and how many days it has been open.', filters: ['department', 'person'], allowed: (app, u) => managerOrAbove(app, u) || isAccounts(app, u),
+    run(app, c) {
+      const p: Params = [c.from, c.to]; const w = who({ ...c, people: isAccounts(app, c.viewer) ? null : c.people }, 'x.employee_id', p);
+      const rows = app.db.all<{ id: string; name: string; team: string; category: string; amount: number; status: string; paid_at: string; settled_at: string | null }>(`SELECT x.id, e.full_name AS name, d.name AS team, x.category, x.amount, x.status, x.paid_at, x.settled_at FROM expenses x JOIN employees e ON e.id = x.employee_id JOIN departments d ON d.id = e.department_id
+        WHERE x.kind = 'advance' AND x.status IN ('paid', 'settled') AND date(x.paid_at, ${TZ}) BETWEEN ? AND ?${w} ORDER BY x.paid_at`, p)
+        .map((r): Cell[] => { const st = advanceState(app, r.id); const end = r.settled_at ? new Date(r.settled_at).getTime() : Date.now();
+          return [{ text: r.id, href: `/money/${r.id}` }, r.name, r.team, r.category, r.paid_at.slice(0, 10), Math.round(r.amount), Math.round(st.billed), Math.round(st.returned), Math.round(st.excessPaid), Math.round(st.balance), Math.max(0, Math.floor((end - new Date(r.paid_at).getTime()) / 86_400_000)), r.status === 'settled' ? 'Settled' : st.pendingBills ? 'Bills waiting for approval' : st.billed ? 'Partly accounted' : 'No bills yet']; });
+      const out = new Map<string, number>(); for (const r of rows) if (Number(r[9]) > 0) out.set(String(r[1]), (out.get(String(r[1])) || 0) + Number(r[9]));
+      const top = [...out.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15);
+      return { columns: [{ header: 'Advance' }, { header: 'Person' }, { header: 'Team' }, { header: 'For' }, { header: 'Given on', fmt: 'date' }, { header: 'Given', fmt: 'money' }, { header: 'Bills accepted', fmt: 'money' }, { header: 'Returned', fmt: 'money' }, { header: 'Paid above advance', fmt: 'money' }, { header: 'Still with person', fmt: 'money' }, { header: 'Days open', fmt: 'int' }, { header: 'Status' }], rows,
+        totals: ['Total', null, null, null, null, sum(rows, 5), sum(rows, 6), sum(rows, 7), sum(rows, 8), sum(rows, 9), null, null], chart: top.length ? { title: 'Advance money still with each person', unit: '₹', labels: top.map((t) => t[0]), values: top.map((t) => t[1]) } : undefined };
+    } },
+  { key: 'fin-cash-out', module: 'finance', title: 'Money paid out, month by month', about: 'For planning budgets: each month\'s reimbursements paid, advances given, unspent advance money returned, the net cash that left, and the expense actually booked (claims approved and bills accepted against advances).', filters: ['department'], allowed: (app, u) => managerOrAbove(app, u) || isAccounts(app, u),
+    run(app, c) {
+      const p: Params = [c.from, c.to]; const dept = c.departmentId ? ' AND e.department_id = ?' : ''; if (c.departmentId) p.push(c.departmentId);
+      const got = new Map(app.db.all<{ m: string; type: string; d: number; cr: number }>(`SELECT substr(l.entry_date, 1, 7) AS m, l.type, SUM(l.debit) AS d, SUM(l.credit) AS cr FROM expense_ledger l JOIN employees e ON e.id = l.employee_id WHERE l.entry_date BETWEEN ? AND ?${dept} GROUP BY 1, 2`, p).map((r) => [`${r.m}|${r.type}`, r]));
+      const v = (m: string, t: string, side: 'd' | 'cr'): number => Math.round(got.get(`${m}|${t}`)?.[side] || 0);
+      const rows = monthsBetween(c.from, c.to).map((m): Cell[] => { const paid = v(m, 'claim_paid', 'd') + v(m, 'excess_paid', 'd'); const adv = v(m, 'advance_paid', 'd'); const back = v(m, 'advance_returned', 'cr');
+        return [monthLabel(m), paid, adv, back, paid + adv - back, v(m, 'claim_approved', 'cr') + v(m, 'settlement_approved', 'cr')]; });
+      return { columns: [{ header: 'Month' }, { header: 'Reimbursements paid', fmt: 'money' }, { header: 'Advances given', fmt: 'money' }, { header: 'Advance money returned', fmt: 'money' }, { header: 'Net cash out', fmt: 'money' }, { header: 'Expense booked', fmt: 'money' }], rows,
+        totals: ['Total', sum(rows, 1), sum(rows, 2), sum(rows, 3), sum(rows, 4), sum(rows, 5)], chart: { title: 'Net cash out by month', unit: '₹', labels: rows.map((r) => String(r[0])), values: rows.map((r) => Math.max(0, Number(r[4]))) },
+        note: 'Net cash out is what left the bank or cash box. Expense booked is what was actually spent on the business; the two differ while advances are outstanding.' };
     } },
   { key: 'fin-purchases', module: 'finance', title: 'Purchases by supplier', about: 'Materials planned, ordered and received in the period, supplier by supplier.', filters: [], allowed: (app, u) => atLeast(app.db, u, 'procurement', 'view'),
     run(app, c) {

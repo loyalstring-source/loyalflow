@@ -1244,5 +1244,51 @@ CREATE INDEX idx_work_sessions_item ON work_sessions(entity_type, entity_id);
 -- The COO's work email changed (25 Nov 2026). Only the old address is rewritten, so a later change is not undone.
 UPDATE employees SET email = 'sridhar.ngowda@loyalstring.com' WHERE id = 'LS002' AND email = 'sridhar.narayanagowda@loyalstring.com';
 `
+  },
+  {
+    id: '0019_expense_ledger',
+    sql: `
+-- Expenses go on to Accounts after approval: reimbursements, advances and advance settlements, each paid and recorded.
+ALTER TABLE expenses ADD COLUMN kind TEXT NOT NULL DEFAULT 'reimbursement';
+ALTER TABLE expenses ADD COLUMN expense_date TEXT;
+ALTER TABLE expenses ADD COLUMN advance_id TEXT REFERENCES expenses(id);
+ALTER TABLE expenses ADD COLUMN paid_at TEXT;
+ALTER TABLE expenses ADD COLUMN paid_by TEXT REFERENCES employees(id);
+ALTER TABLE expenses ADD COLUMN pay_mode TEXT NOT NULL DEFAULT '';
+ALTER TABLE expenses ADD COLUMN pay_ref TEXT NOT NULL DEFAULT '';
+ALTER TABLE expenses ADD COLUMN settled_at TEXT;
+-- Bills, receipts and payment proofs. The files sit outside the public uploads folder.
+CREATE TABLE expense_docs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  expense_id TEXT NOT NULL REFERENCES expenses(id),
+  kind TEXT NOT NULL DEFAULT 'bill',
+  file_path TEXT NOT NULL,
+  file_name TEXT NOT NULL,
+  size INTEGER NOT NULL DEFAULT 0,
+  uploaded_by TEXT REFERENCES employees(id),
+  uploaded_at TEXT NOT NULL
+);
+CREATE INDEX idx_expense_docs ON expense_docs(expense_id);
+-- One line for every rupee approved, paid, advanced or returned. debit: money to the person. credit: owed to, or accounted for by, the person.
+CREATE TABLE expense_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id TEXT NOT NULL REFERENCES employees(id),
+  expense_id TEXT REFERENCES expenses(id),
+  entry_date TEXT NOT NULL,
+  type TEXT NOT NULL,
+  debit REAL NOT NULL DEFAULT 0,
+  credit REAL NOT NULL DEFAULT 0,
+  mode TEXT NOT NULL DEFAULT '',
+  ref TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  created_by TEXT REFERENCES employees(id),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX idx_expense_ledger_person ON expense_ledger(employee_id, entry_date);
+CREATE INDEX idx_expense_ledger_claim ON expense_ledger(expense_id);
+-- Claims approved before this change are owed to the person until Accounts marks them paid.
+INSERT INTO expense_ledger (employee_id, expense_id, entry_date, type, debit, credit, note, created_at)
+  SELECT employee_id, id, date(created_at, '+330 minutes'), 'claim_approved', 0, amount, category, created_at FROM expenses WHERE status = 'approved';
+`
   }
 ];

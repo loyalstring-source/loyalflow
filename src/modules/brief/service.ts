@@ -46,7 +46,7 @@ export function measures(app: App): Measure[] {
       return rate(present, heads * workingDays(a, f, end));
     } });
   add('ACC', { key: 'spend', name: 'Spend against budget', unit: 'inr', kind: 'sum', direction: 'down', defaultTarget: 1_200_000, report: '/reports/fin-expenses-category', help: 'Approved expense claims plus the estimated cost of purchases raised in the month. The target is the most you want to spend.',
-    actual: (a, f, t) => (one(a, `SELECT COALESCE(SUM(amount), 0) AS v FROM expenses WHERE status = 'approved' AND ${ld('created_at')} BETWEEN ? AND ?`, [f, t]).v || 0) + (one(a, `SELECT COALESCE(SUM(est_cost), 0) AS v FROM procurement_items WHERE ${ld('created_at')} BETWEEN ? AND ?`, [f, t]).v || 0) });
+    actual: (a, f, t) => (one(a, `SELECT COALESCE(SUM(amount), 0) AS v FROM expenses WHERE status IN ('approved', 'paid') AND kind <> 'advance' AND ${ld('created_at')} BETWEEN ? AND ?`, [f, t]).v || 0) + (one(a, `SELECT COALESCE(SUM(est_cost), 0) AS v FROM procurement_items WHERE ${ld('created_at')} BETWEEN ? AND ?`, [f, t]).v || 0) });
   // Any other team that holds a daily review is measured by how much of its plan it finishes.
   const styles = dsrStyles(app); const has = new Set(out.map((m) => m.deptId));
   for (const d of depts) {

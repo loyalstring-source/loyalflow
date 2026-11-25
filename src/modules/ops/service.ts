@@ -132,7 +132,7 @@ export function budgets(app: App, fy = fiscalYear(new Date())): BudgetLine[] {
   const { start, end } = fyBounds(fy);
   return listDepartments(app.db).filter((d) => d.code !== 'LEAD').map((d) => {
     const row = app.db.get<{ amount: number; notes: string }>('SELECT amount, notes FROM budgets WHERE department_id = ? AND fiscal_year = ?', [d.id, fy]);
-    const spent = app.db.get<{ n: number }>("SELECT COALESCE(SUM(x.amount),0) AS n FROM expenses x JOIN employees e ON e.id = x.employee_id WHERE e.department_id = ? AND x.status = 'approved' AND x.created_at >= ? AND x.created_at < ?", [d.id, start, end])?.n || 0;
+    const spent = app.db.get<{ n: number }>("SELECT COALESCE(SUM(x.amount),0) AS n FROM expenses x JOIN employees e ON e.id = x.employee_id WHERE e.department_id = ? AND x.status IN ('approved', 'paid') AND x.kind <> 'advance' AND x.created_at >= ? AND x.created_at < ?", [d.id, start, end])?.n || 0;
     const purchases = app.db.get<{ n: number }>("SELECT COALESCE(SUM(t.amount),0) AS n FROM tasks t JOIN employees e ON e.id = t.requester_id WHERE t.type = 'purchase' AND e.department_id = ? AND t.status = 'approved' AND t.created_at >= ? AND t.created_at < ?", [d.id, start, end])?.n || 0;
     const committed = app.db.get<{ n: number }>("SELECT COALESCE(SUM(t.amount),0) AS n FROM tasks t JOIN employees e ON e.id = t.requester_id WHERE t.type IN ('purchase','expense') AND e.department_id = ? AND t.status = 'open' AND t.created_at >= ? AND t.created_at < ?", [d.id, start, end])?.n || 0;
     const amount = row?.amount || 0; const used = spent + purchases;
@@ -160,7 +160,7 @@ export function travelReport(app: App, since: string, until: string, employeeIds
   const where = employeeIds && employeeIds.length ? `AND a.actor_id IN (${employeeIds.map(() => '?').join(',')})` : '';
   const visits = app.db.all<{ employee_id: string; name: string; visits: number; km: number }>(`SELECT a.actor_id AS employee_id, e.full_name AS name, count(*) AS visits, COALESCE(SUM(a.km),0) AS km FROM activities a JOIN employees e ON e.id = a.actor_id WHERE a.kind = 'visit' AND a.at >= ? AND a.at < ? ${where} GROUP BY a.actor_id`, [since, until, ...(employeeIds || [])]);
   const rows: TravelRow[] = visits.map((v) => {
-    const claimed = app.db.get<{ n: number }>("SELECT COALESCE(SUM(amount),0) AS n FROM expenses WHERE employee_id = ? AND status != 'declined' AND lower(category) LIKE '%travel%' AND created_at >= ? AND created_at < ?", [v.employee_id, since, until])?.n || 0;
+    const claimed = app.db.get<{ n: number }>("SELECT COALESCE(SUM(amount),0) AS n FROM expenses WHERE employee_id = ? AND status != 'declined' AND kind <> 'advance' AND lower(category) LIKE '%travel%' AND created_at >= ? AND created_at < ?", [v.employee_id, since, until])?.n || 0;
     const won = app.db.get<{ n: number; v: number }>('SELECT count(*) AS n, COALESCE(SUM(value * (1 - discount_pct / 100.0)),0) AS v FROM deals WHERE owner_id = ? AND won_at >= ? AND won_at < ?', [v.employee_id, since, until]) || { n: 0, v: 0 };
     const open = app.db.get<{ v: number }>("SELECT COALESCE(SUM(value * (1 - discount_pct / 100.0)),0) AS v FROM deals WHERE owner_id = ? AND stage NOT IN ('won','lost')", [v.employee_id])?.v || 0;
     return { employee_id: v.employee_id, name: v.name, visits: v.visits, km: Math.round(v.km * 10) / 10, estCost: Math.round(v.km * rate), claimed, wonValue: won.v, wonDeals: won.n, openValue: open };

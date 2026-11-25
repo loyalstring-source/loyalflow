@@ -78,12 +78,12 @@ const HEAD = (title: string) => html`<meta charset="utf-8"><meta name="viewport"
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="/static/theme.css?v=${ASSET_V}">`;
 
-export const ASSET_V = '28';
+export const ASSET_V = '29';
 
 /** The modules of the app, each with its own tabs. A person sees a module when their role lets them into at least one of its tabs. */
 interface ModuleDef { key: string; name: string; icon: string; tone: string; tabs: string[] }
 const MODULES: ModuleDef[] = [
-  { key: 'home', name: 'Home', icon: 'home', tone: 'blue', tabs: ['overview', 'today', 'dsr', 'approvals', 'tasks', 'notifications'] },
+  { key: 'home', name: 'Home', icon: 'home', tone: 'blue', tabs: ['overview', 'today', 'dsr', 'approvals', 'tasks', 'money', 'notifications'] },
   { key: 'sales', name: 'Sales', icon: 'star', tone: 'orange', tabs: ['pipeline', 'estimates', 'products', 'customers', 'reports:sales'] },
   { key: 'support', name: 'Support', icon: 'ticket', tone: 'blue', tabs: ['desk', 'reports:support'] },
   { key: 'dev', name: 'Development', icon: 'code', tone: 'violet', tabs: ['dev', 'reports:dev'] },
@@ -110,6 +110,7 @@ export function modulesFor(v: View): ModuleNav[] {
   if (companyLevel && byKey.has('today')) byKey.set('today', { ...byKey.get('today')!, href: '/my-day' });
   if (leads || v.app.db.get('SELECT 1 AS x FROM target_setters WHERE employee_id = ?', [v.user.id])) byKey.set('targets', { key: 'targets', label: 'Targets', href: '/targets', icon: 'target' });
   if (companyLevel) byKey.set('admins', { key: 'admins', label: 'Administrators', href: '/admins', icon: 'user' });
+  byKey.set('money', { key: 'money', label: 'Expenses', href: '/money', icon: 'rupee' });
   byKey.set('notifications', { key: 'notifications', label: 'Notifications', href: '/notifications', icon: 'bell', badge: v.unread });
   const rename: Record<string, string> = { today: companyLevel ? 'My day' : 'Today', pipeline: 'Deals', desk: 'Tickets', dev: 'Board', production: 'Work orders', people: 'Directory', company: 'Dashboard', settings: 'General' };
   return MODULES.map((m) => ({ key: m.key, name: m.name, icon: m.icon, tone: m.tone, tabs: m.tabs.map((k) => byKey.get(k)).filter((x): x is NavItem => !!x).map((t) => ({ ...t, label: rename[t.key] || t.label })) })).filter((m) => m.tabs.length);
@@ -117,7 +118,7 @@ export function modulesFor(v: View): ModuleNav[] {
 /** Which tab a page belongs to. */
 export function tabKey(path: string): string {
   const seg = path.split('/')[1] || '';
-  if (['estimates', 'products', 'customers', 'lists', 'roles', 'notifications', 'dsr', 'overview', 'targets', 'admins'].includes(seg)) return seg;
+  if (['estimates', 'products', 'customers', 'lists', 'roles', 'notifications', 'dsr', 'overview', 'targets', 'admins', 'money'].includes(seg)) return seg;
   return activeKey(path);
 }
 
