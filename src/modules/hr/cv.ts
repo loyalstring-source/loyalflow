@@ -282,3 +282,15 @@ export function commitBatch(app: App, actor: Employee, requisitionId: string, ba
   audit(app.db, { actorId: actor.id, entity: 'requisition', entityId: requisitionId, action: 'bulk_cv', after: { created: created.length, skipped: skipped.length } });
   return { created, skipped };
 }
+
+
+/** A CV sent in by the applicant through a vacancy's public link. Read by the rules only, never sent to an outside service without HR choosing to. */
+export function attachApplicantCv(app: App, candidateId: string, name: string, buf: Buffer): void {
+  const { mime } = checkFile(name, buf.length);
+  let text = ''; try { text = extname(name).toLowerCase() === '.docx' ? docxText(buf) : extname(name).toLowerCase() === '.pdf' ? pdfText(buf) : ''; } catch { text = ''; }
+  const data = looksLikeText(text) ? rulesExtract(text) : ({} as CvData);
+  const rel = store(app, candidateId, name, buf);
+  app.db.run('UPDATE candidates SET cv_path = ?, cv_name = ?, cv_mime = ?, cv_text = ?, cv_summary = ?, cv_data = ?, cv_source = ?, cv_uploaded_at = ?, updated_at = ? WHERE id = ?',
+    [rel, name.replace(/[^\w.\- ]+/g, '_').slice(-160), mime, text.slice(0, 60_000), (data.summary || '').slice(0, 1200), JSON.stringify(data), looksLikeText(text) ? 'rules' : 'none', nowIso(), nowIso(), candidateId]);
+  audit(app.db, { actorId: null, entity: 'candidate', entityId: candidateId, action: 'cv_uploaded', after: { name, by: 'applicant' } });
+}

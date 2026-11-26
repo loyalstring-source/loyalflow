@@ -20,7 +20,9 @@ import { cvOf, aiSettings } from '../modules/hr/cv.ts';
 import { screeningCard, planCard, cvCard, vacancyExtras } from '../ui/pages/hire-extra.ts';
 import { html, when } from '../lib/html.ts';
 import { page } from '../ui/layout.ts';
-import { empty } from '../ui/components.ts';
+import { empty, button } from '../ui/components.ts';
+import { applyLink, overdue, duplicatePairs, aging } from '../modules/hr/hire-plus.ts';
+import { applyLinkCard, hireHomeExtras, agePill } from '../ui/pages/hire-plus.ts';
 import { done, fail, view, user, str, num } from './helpers.ts';
 
 function requireRecruiter(app: App, e: Employee): void {
@@ -42,7 +44,8 @@ export function register(r: Router<Employee>, app: App): void {
       holds: rec ? holdQueue(app) : [], onboarding: rec ? onboardingQueue(app) : [],
       stats: hiringStats(app),
       requisitions: rec ? listRequisitions(app, { limit: 50 }) : [],
-      pipeline: pipelineCounts(app), myInterviews: mine, scorecardsDue: due, canRecruit: rec
+      pipeline: pipelineCounts(app), myInterviews: mine, scorecardsDue: due, canRecruit: rec,
+      extras: hireHomeExtras({ canRecruit: rec, overdue: rec ? overdue(app).length : 0, duplicates: rec ? duplicatePairs(app).length : 0, viaLink: 0 })
     }));
   });
 
@@ -109,7 +112,7 @@ export function register(r: Router<Employee>, app: App): void {
     return htmlResponse(requisitionPage(v, {
       req, applications: listApplications(app, { requisitionId: req.id, limit: 300 }), pipeline: pipelineCounts(app, req.id),
       canRecruit: rec, canSubmit: req.status === 'draft' && rec, canAssess: canIssue(app).ok, screening: screeningTotals(app, req.id),
-      extraSide: (() => { const p = planOf(app, req.id); const qs = setFor(app, req.id); return vacancyExtras({ req, steps: p.steps, planOwn: p.own, questions: qs.questions.length, points: qs.questions.reduce((n, q) => n + q.maxPoints, 0), questionsOwn: qs.own, canEdit: rec }); })()
+      extraSide: (() => { const p = planOf(app, req.id); const qs = setFor(app, req.id); return html`${applyLinkCard({ req, link: applyLink(app, req.id), url: `${app.cfg.baseUrl}/apply/${applyLink(app, req.id).token || ''}`, canEdit: rec })}${vacancyExtras({ req, steps: p.steps, planOwn: p.own, questions: qs.questions.length, points: qs.questions.reduce((n, q) => n + q.maxPoints, 0), questionsOwn: qs.own, canEdit: rec })}`; })()
     }));
   });
   r.get('/hire/req/:id/add', (ctx) => {
@@ -122,8 +125,8 @@ export function register(r: Router<Employee>, app: App): void {
     const v = view(ctx); requireRecruiter(app, v.user);
     const q = (ctx.query.get('q') || '').trim();
     const rows = q
-      ? app.db.all<Candidate>("SELECT * FROM candidates WHERE lower(full_name) LIKE ? OR email_normalized LIKE ? OR phone LIKE ? ORDER BY created_at DESC LIMIT 200", [`%${q.toLowerCase()}%`, `%${q.toLowerCase()}%`, `%${q}%`])
-      : app.db.all<Candidate>('SELECT * FROM candidates ORDER BY created_at DESC LIMIT 200');
+      ? app.db.all<Candidate>("SELECT * FROM candidates WHERE merged_into IS NULL AND (lower(full_name) LIKE ? OR email_normalized LIKE ? OR phone LIKE ?) ORDER BY created_at DESC LIMIT 200", [`%${q.toLowerCase()}%`, `%${q.toLowerCase()}%`, `%${q}%`])
+      : app.db.all<Candidate>('SELECT * FROM candidates WHERE merged_into IS NULL ORDER BY created_at DESC LIMIT 200');
     const withCounts = rows.map((c) => ({ ...c, applications: app.db.get<{ n: number }>('SELECT count(*) AS n FROM applications WHERE candidate_id = ?', [c.id])?.n || 0 }));
     return htmlResponse(candidatesPage(v, { rows: withCounts, q }));
   });
@@ -137,8 +140,10 @@ export function register(r: Router<Employee>, app: App): void {
     try {
       const dupes = findDuplicates(app, { email: str(b, 'email'), phone: str(b, 'phone'), fullName: str(b, 'fullName') });
       if (dupes.length && !str(b, 'confirmDuplicate')) return fail(ctx, 409, `We may already have ${dupes[0].full_name} on record. Open that record and add the new role to it, or resubmit to create a second record.`);
-      const c = saveCandidate(app, me, { fullName: str(b, 'fullName'), email: str(b, 'email'), phone: str(b, 'phone'), currentEmployer: str(b, 'currentEmployer'), experienceYears: num(b, 'experienceYears'), currentCtc: num(b, 'currentCtc'), expectedCtc: num(b, 'expectedCtc'), noticeDays: num(b, 'noticeDays'), location: str(b, 'location'), notes: str(b, 'notes') });
       const reqId = str(b, 'requisitionId');
+      // Check the vacancy before saving the person, so a refused vacancy does not leave a half-added candidate behind.
+      if (reqId) { const rq = getRequisition(app, reqId); if (!rq) throw new HttpError(404, 'Vacancy not found.'); if (rq.status !== 'open') throw new HttpError(400, rq.status === 'paused' ? 'That vacancy is paused. Resume it before adding people.' : rq.status === 'draft' ? 'That vacancy is still a draft. Open it first.' : 'That vacancy is not open.'); }
+      const c = saveCandidate(app, me, { fullName: str(b, 'fullName'), email: str(b, 'email'), phone: str(b, 'phone'), currentEmployer: str(b, 'currentEmployer'), experienceYears: num(b, 'experienceYears'), currentCtc: num(b, 'currentCtc'), expectedCtc: num(b, 'expectedCtc'), noticeDays: num(b, 'noticeDays'), location: str(b, 'location'), notes: str(b, 'notes') });
       if (reqId) { const a = addApplication(app, me, { candidateId: c.id, requisitionId: reqId, source: str(b, 'source') || 'direct' }); return done(ctx, { redirect: `/hire/app/${a.id}`, toast: { title: 'Candidate added', body: `${c.full_name} is on the role.`, kind: 'success' } }); }
       return done(ctx, { redirect: '/hire/candidates', toast: { title: 'Candidate saved', kind: 'success' } });
     } catch (e) { if (e instanceof HttpError) return fail(ctx, e.status, e.message); throw e; }
@@ -164,7 +169,8 @@ export function register(r: Router<Employee>, app: App): void {
       extraSide: rec ? cvCard({ candidateId: a.candidate_id, cv: cvOf(app, a.candidate_id), canEdit: rec, ai: aiSettings(app) }) : undefined,
       assessments: rec ? invitationsOf(app, a.id) : [], messages: rec ? messagesOf(app, a.id) : [], canAssess: canIssue(app).ok,
       decisions: decisionsOf(app, a.id), onboarding: onboardingOf(app, a.id), onboardingItems: onboardingOf(app, a.id) ? onboardingItems(app, onboardingOf(app, a.id)!.id) : [],
-      canRecruit: rec, canDecide: rec
+      canRecruit: rec, canDecide: rec,
+      extraActions: (() => { const ag = a.status === 'active' ? aging(app).find((x) => x.id === a.id) : undefined; return html`${ag ? agePill(ag) : ''}${when(rec && !!a.candidate_email, () => button('Message', { modal: `/hire/app/${a.id}/message`, icon: 'mail' }))}`; })()
     }));
   });
   r.post('/hire/app/:id/stage', async (ctx) => {
@@ -272,7 +278,7 @@ export function register(r: Router<Employee>, app: App): void {
   r.get('/hire/interview/:id/reschedule', (ctx) => {
     const v = view(ctx); const i = getInterview(app, ctx.params.id);
     if (!i) throw new HttpError(404, 'Interview not found.');
-    return htmlResponse(rescheduleModal(v, i));
+    return htmlResponse(rescheduleModal(v, i, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(ctx.query.get('at') || '') ? ctx.query.get('at')! : ''));
   });
   r.post('/hire/interview/:id/reschedule', async (ctx) => {
     const me = user(ctx); const b = await ctx.body() as Record<string, unknown>;

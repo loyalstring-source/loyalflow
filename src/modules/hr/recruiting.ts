@@ -193,9 +193,9 @@ export function getCandidate(app: App, id: string): Candidate | undefined { retu
 /** Candidates are people, not rows per job: the same person applying twice is the same record. */
 export function findDuplicates(app: App, input: { email?: string; phone?: string; fullName?: string }): Candidate[] {
   const out = new Map<string, Candidate>();
-  if (input.email) for (const c of app.db.all<Candidate>('SELECT * FROM candidates WHERE email_normalized = ?', [normalizeEmail(input.email)])) out.set(c.id, c);
-  if (input.phone) { const digits = input.phone.replace(/\D/g, '').slice(-10); if (digits.length === 10) for (const c of app.db.all<Candidate>("SELECT * FROM candidates WHERE replace(replace(replace(phone, ' ', ''), '-', ''), '+', '') LIKE ?", [`%${digits}`])) out.set(c.id, c); }
-  if (input.fullName && input.fullName.trim().length > 4) for (const c of app.db.all<Candidate>('SELECT * FROM candidates WHERE lower(full_name) = ?', [input.fullName.trim().toLowerCase()])) out.set(c.id, c);
+  if (input.email) for (const c of app.db.all<Candidate>('SELECT * FROM candidates WHERE email_normalized = ? AND merged_into IS NULL', [normalizeEmail(input.email)])) out.set(c.id, c);
+  if (input.phone) { const digits = input.phone.replace(/\D/g, '').slice(-10); if (digits.length === 10) for (const c of app.db.all<Candidate>("SELECT * FROM candidates WHERE merged_into IS NULL AND replace(replace(replace(phone, ' ', ''), '-', ''), '+', '') LIKE ?", [`%${digits}`])) out.set(c.id, c); }
+  if (input.fullName && input.fullName.trim().length > 4) for (const c of app.db.all<Candidate>('SELECT * FROM candidates WHERE lower(full_name) = ? AND merged_into IS NULL', [input.fullName.trim().toLowerCase()])) out.set(c.id, c);
   return [...out.values()];
 }
 
@@ -241,7 +241,7 @@ export function applicationEvents(app: App, id: string) {
   return app.db.all<{ id: number; kind: string; text: string; from_stage: string | null; to_stage: string | null; actor_id: string | null; at: string; actor_name: string | null }>(
     'SELECT e.*, emp.full_name AS actor_name FROM application_events e LEFT JOIN employees emp ON emp.id = e.actor_id WHERE e.application_id = ? ORDER BY e.id DESC LIMIT 100', [id]);
 }
-function logEvent(app: App, id: string, kind: string, text: string, actorId: string | null, from?: string | null, to?: string | null): void {
+export function logEvent(app: App, id: string, kind: string, text: string, actorId: string | null, from?: string | null, to?: string | null): void {
   app.db.run('INSERT INTO application_events (application_id, kind, text, from_stage, to_stage, actor_id, at) VALUES (?, ?, ?, ?, ?, ?, ?)', [id, kind, text, from ?? null, to ?? null, actorId, nowIso()]);
 }
 
@@ -417,6 +417,8 @@ export function listInterviews(app: App, f: { applicationId?: string; interviewe
 }
 
 /** Interviewers already booked at that time, so nobody is double-booked by accident. */
+/** A date and time typed into a form carries no time zone; it is office time (IST), whatever clock the server runs on. */
+export const parseWhen = (s: string): Date => new Date(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(s) ? `${s}+05:30` : s);
 export function panelConflicts(app: App, panel: string[], startsAt: string, endsAt: string, ignoreInterviewId?: string): { id: string; name: string; clashWith: string }[] {
   if (!panel.length) return [];
   const out: { id: string; name: string; clashWith: string }[] = [];
@@ -437,7 +439,7 @@ export function scheduleInterview(app: App, actor: Employee, input: { applicatio
   requireSeeApplication(app, actor, a);
   if (a.status !== 'active') throw new HttpError(400, 'This application is closed.');
   if (!input.panel.length) throw new HttpError(400, 'Put at least one interviewer on the panel.');
-  const starts = new Date(input.startsAt);
+  const starts = parseWhen(input.startsAt);
   if (Number.isNaN(starts.getTime())) throw new HttpError(400, 'Pick a date and time.');
   // A past time is usually a typo, but HR sometimes records an interview that already happened: 'schedule anyway' covers both.
   if (starts.getTime() < Date.now() - 86_400_000 && !input.force) throw new HttpError(400, 'That time is in the past. Tick “schedule anyway” if you are recording an interview that already happened.');
@@ -464,7 +466,7 @@ export function rescheduleInterview(app: App, actor: Employee, id: string, start
   if (!i) throw new HttpError(404, 'Interview not found.');
   if (i.status !== 'scheduled') throw new HttpError(400, 'That interview is not open.');
   if (reason.trim().length < 5) throw new HttpError(400, 'Say why it is moving — the candidate will be told.');
-  const starts = new Date(startsAt);
+  const starts = parseWhen(startsAt);
   if (Number.isNaN(starts.getTime())) throw new HttpError(400, 'Pick a date and time.');
   const ends = new Date(starts.getTime() + Math.max(15, minutes || 45) * 60_000);
   const panel = (i.panel || []).map((p) => p.id);

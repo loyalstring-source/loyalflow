@@ -40,7 +40,7 @@ interface Row extends Invitation { token_hash: string; token_cipher: string; ans
 
 const nowIso = () => new Date().toISOString();
 export const STATUS_LABEL: Record<string, string> = { invited: 'Invited', started: 'Started', submitted: 'Submitted', expired: 'Expired', replaced: 'Replaced' };
-export const SEND_LABEL: Record<string, string> = { not_sent: 'Not sent', accepted: 'Accepted by Microsoft 365', uncertain: 'Uncertain — check Sent Items', failed: 'Failed' };
+export const SEND_LABEL: Record<string, string> = { not_sent: 'Not sent', accepted: 'Accepted by Microsoft 365', uncertain: 'Uncertain — check Sent Items', failed: 'Failed', manual: 'Sent by HR from own mail' };
 export const OUTCOMES: { value: string; label: string }[] = [{ value: 'meets', label: 'Meets the level needed for this role' }, { value: 'borderline', label: 'Borderline for this role' }, { value: 'below', label: 'Below the level needed for this role' }];
 
 // ---------- The secret link ----------

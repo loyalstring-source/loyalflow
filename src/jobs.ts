@@ -9,6 +9,7 @@ import { generateInstances, escalateOverdue } from './modules/sops/service.ts';
 import { getSetting } from './lib/settings.ts';
 import { listEmployees } from './modules/people/model.ts';
 import { advanceReminders } from './modules/money/service.ts';
+import { overdueReminders } from './modules/hr/hire-plus.ts';
 import { toLocal, weekLabelShort, isoWeek } from './lib/time.ts';
 
 export interface JobResult { job: string; detail: string; at: string }
@@ -91,7 +92,7 @@ export function createScheduler(app: App, log: (msg: string) => void): { start()
       runAssessmentJobs(app, now).then((r) => { if (r.expired || r.finalized || r.reminders) log(`job assessments: ${r.reminders} reminders, ${r.expired} expired, ${r.finalized} timed out`); })
         .catch((e) => log(`job assessments failed: ${(e as Error).message}`)).finally(() => { assessBusy = false; });
     }
-    if (lastMoneyDay !== day && local.hh >= 9) { lastMoneyDay = day; safe('advances', () => record('advances', `${advanceReminders(app, now)} advance reminders`)); }
+    if (lastMoneyDay !== day && local.hh >= 9) { lastMoneyDay = day; safe('advances', () => record('advances', `${advanceReminders(app, now)} advance reminders`)); safe('hiring-overdue', () => record('hiring-overdue', `${overdueReminders(app, now)} overdue reminders`)); }
     if (lastBackupDay !== day && local.hh === 2) { lastBackupDay = day; safe('backup', () => jobBackup(app)); }
     const week = isoWeek(now);
     if (local.dow === 1 && local.hh === 8 && lastDigestWeek !== week) { lastDigestWeek = week; safe('digest', () => jobDigest(app, now)); }

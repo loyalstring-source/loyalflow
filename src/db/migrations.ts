@@ -1338,5 +1338,35 @@ CREATE TABLE user_prefs (
   PRIMARY KEY (employee_id, key)
 );
 `
+  },
+  {
+    id: '0023_hiring_plus',
+    sql: `
+-- Public "Apply" link per vacancy.
+ALTER TABLE requisitions ADD COLUMN apply_token TEXT;
+ALTER TABLE requisitions ADD COLUMN apply_enabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE requisitions ADD COLUMN apply_intro TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX idx_requisitions_apply ON requisitions(apply_token) WHERE apply_token IS NOT NULL;
+-- How long an application may sit in a stage before it is overdue.
+CREATE TABLE hire_stage_limits (stage TEXT PRIMARY KEY, days INTEGER NOT NULL);
+ALTER TABLE applications ADD COLUMN overdue_notified_at TEXT;
+-- Message templates with fields that are filled in for each candidate.
+CREATE TABLE hire_templates (
+  key TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  subject TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  position INTEGER NOT NULL DEFAULT 0,
+  builtin INTEGER NOT NULL DEFAULT 0,
+  updated_by TEXT REFERENCES employees(id),
+  updated_at TEXT NOT NULL
+);
+ALTER TABLE hire_messages ADD COLUMN body TEXT NOT NULL DEFAULT '';
+-- Two records of the same person, merged after HR reviews them. The second record is kept, hidden, and points at the first.
+ALTER TABLE candidates ADD COLUMN merged_into TEXT REFERENCES candidates(id);
+ALTER TABLE candidates ADD COLUMN merged_at TEXT;
+ALTER TABLE candidates ADD COLUMN merged_by TEXT REFERENCES employees(id);
+CREATE TABLE candidate_not_duplicates (a TEXT NOT NULL, b TEXT NOT NULL, by TEXT REFERENCES employees(id), at TEXT NOT NULL, PRIMARY KEY (a, b));
+`
   }
 ];

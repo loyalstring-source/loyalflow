@@ -443,3 +443,103 @@
   });
   box.querySelector('[data-lm-reset]').addEventListener('click', function () { window.LF.post('/me/menu', { order: [], pins: pins() }).then(function () { window.location.reload(); }); });
 })();
+
+/* ---------- Hiring: apply page, interview calendar, message templates ---------- */
+(function () {
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  function hhmm(m) { return pad(Math.floor(m / 60)) + ':' + pad(m % 60); }
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+  // Apply page: show the chosen file's name.
+  document.addEventListener('change', function (e) {
+    var drop = e.target.closest && e.target.closest('.apply-drop'); if (!drop) return;
+    var f = e.target.files && e.target.files[0]; var label = drop.querySelector('b'); if (!label) return;
+    if (f && f.size > 5 * 1024 * 1024) { e.target.value = ''; label.textContent = 'That file is larger than 5 MB. Choose a smaller one.'; drop.classList.remove('has'); return; }
+    label.textContent = f ? f.name : 'Choose a file, or drop it here'; drop.classList.toggle('has', !!f);
+  });
+
+  // Calendar: drag an interview to move it, drag a waiting candidate to book, click an empty time to book.
+  var drag = null, ghost = null;
+  function calOf(el) { return el && el.closest ? el.closest('[data-cal]') : null; }
+  function slot(col, clientY, step) {
+    var cal = calOf(col); var start = Number(cal.getAttribute('data-start') || 480), ppm = Number(cal.getAttribute('data-ppm') || 1);
+    var y = clientY - col.getBoundingClientRect().top; var m = start + Math.round(y / ppm / step) * step;
+    return Math.max(start, Math.min(start + col.offsetHeight / ppm - 30, m));
+  }
+  function clearGhost() { if (ghost) { ghost.remove(); ghost = null; } Array.prototype.forEach.call(document.querySelectorAll('.cal-over'), function (x) { x.classList.remove('cal-over'); }); }
+  document.addEventListener('dragstart', function (e) {
+    var ev = e.target.closest && e.target.closest('[data-ev][draggable]'); var person = e.target.closest && e.target.closest('.cal-person[data-app]');
+    if (!ev && !person) return;
+    drag = ev ? { kind: 'ev', id: ev.getAttribute('data-ev'), min: Number(ev.getAttribute('data-min') || 45), time: ev.getAttribute('data-time') || '' } : { kind: 'app', id: person.getAttribute('data-app'), min: 45, time: '' };
+    try { e.dataTransfer.setData('text/plain', drag.id); e.dataTransfer.effectAllowed = 'move'; } catch (x) { /* some browsers refuse */ }
+    (ev || person).classList.add('dragging');
+  });
+  document.addEventListener('dragend', function () { drag = null; clearGhost(); Array.prototype.forEach.call(document.querySelectorAll('.dragging'), function (x) { x.classList.remove('dragging'); }); });
+  document.addEventListener('dragover', function (e) {
+    if (!drag) return; var col = e.target.closest && e.target.closest('.cal-col,.cal-cell'); if (!col) return;
+    e.preventDefault(); clearGhost(); col.classList.add('cal-over');
+    if (col.classList.contains('cal-col')) {
+      var cal = calOf(col); var m = slot(col, e.clientY, 15);
+      ghost = document.createElement('div'); ghost.className = 'cal-ghost'; ghost.textContent = hhmm(m);
+      ghost.style.top = ((m - Number(cal.getAttribute('data-start'))) * Number(cal.getAttribute('data-ppm'))) + 'px'; ghost.style.height = Math.max(24, drag.min * Number(cal.getAttribute('data-ppm'))) + 'px';
+      col.appendChild(ghost);
+    }
+  });
+  document.addEventListener('drop', function (e) {
+    if (!drag) return; var col = e.target.closest && e.target.closest('.cal-col,.cal-cell'); if (!col) return;
+    e.preventDefault(); var d = drag; var day = col.getAttribute('data-day');
+    var time = col.classList.contains('cal-col') ? hhmm(slot(col, e.clientY, 15)) : (d.time || '11:00');
+    clearGhost(); drag = null;
+    if (d.kind === 'ev') window.LF.openModal('/hire/interview/' + encodeURIComponent(d.id) + '/reschedule?at=' + day + 'T' + time);
+    else window.LF.openModal('/hire/calendar/new?at=' + day + 'T' + time + '&app=' + encodeURIComponent(d.id));
+  });
+  document.addEventListener('click', function (e) {
+    var col = e.target.closest && e.target.closest('.cal-col,.cal-cell'); if (!col) return;
+    var cal = calOf(col); if (!cal || !cal.getAttribute('data-edit')) return;
+    if (e.target.closest('[data-ev],a')) return;
+    var time = col.classList.contains('cal-col') ? hhmm(slot(col, e.clientY, 30)) : '11:00';
+    window.LF.openModal('/hire/calendar/new?at=' + col.getAttribute('data-day') + 'T' + time);
+  });
+
+  // Template editor: click a field to drop it in; the preview fills in a sample candidate as you type.
+  var tplForm = document.querySelector('form[data-tpl]');
+  if (tplForm) {
+    var cfg = {}; try { cfg = JSON.parse(document.getElementById('tpl-samples').textContent); } catch (x) { cfg = { samples: {}, labels: {} }; }
+    var subj = document.getElementById('tpl-subject'), body = document.getElementById('tpl-body'), last = body;
+    [subj, body].forEach(function (el) { el.addEventListener('focus', function () { last = el; }); el.addEventListener('input', preview); });
+    function fillIn(text, bad) {
+      return esc(text).replace(/\{\{\s*([\w ]+?)\s*\}\}/g, function (_m, k) { k = k.trim(); if (cfg.samples[k] === undefined) { bad.push(k); return '<mark class="bad">{{' + esc(k) + '}}</mark>'; } return '<mark>' + esc(cfg.samples[k]) + '</mark>'; });
+    }
+    function preview() {
+      var bad = [];
+      document.getElementById('tpl-psub').innerHTML = fillIn(subj.value || 'Subject', bad);
+      document.getElementById('tpl-pbody').innerHTML = fillIn(body.value || 'Your message will show here.', bad).replace(/\n/g, '<br>');
+      document.getElementById('tpl-pwarn').textContent = bad.length ? 'LoyalFlow does not know: ' + bad.map(function (b) { return '{{' + b + '}}'; }).join(', ') + '. Pick fields from the list.' : 'Highlighted words change for each candidate.';
+    }
+    document.addEventListener('click', function (e) {
+      var chip = e.target.closest && e.target.closest('.tpl-chip[data-field]'); if (!chip) return;
+      var el = last || body; var tok = '{{' + chip.getAttribute('data-field') + '}}'; var s = el.selectionStart == null ? el.value.length : el.selectionStart, en = el.selectionEnd == null ? s : el.selectionEnd;
+      el.value = el.value.slice(0, s) + tok + el.value.slice(en); el.focus(); el.selectionStart = el.selectionEnd = s + tok.length; preview();
+      chip.classList.add('used'); setTimeout(function () { chip.classList.remove('used'); }, 500);
+    });
+    preview();
+  }
+
+  // Message to a candidate: changing the template or the interview writes the message again.
+  document.addEventListener('change', function (e) {
+    var form = e.target.closest && e.target.closest('form[data-msg]'); if (!form) return;
+    if (e.target.name !== 'templateKey' && e.target.name !== 'interviewId') return;
+    var iv = form.querySelector('[name=interviewId]');
+    fetch(form.getAttribute('data-msg') + '?t=' + encodeURIComponent(form.querySelector('[name=templateKey]').value) + '&interview=' + encodeURIComponent(iv ? iv.value : ''), { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then(function (r) { return r.json(); }).then(function (j) {
+        if (!j.ok) { window.LF.toast({ kind: 'critical', title: 'That did not work', body: j.error }); return; }
+        form.querySelector('[name=subject]').value = j.subject; form.querySelector('[name=body]').value = j.body;
+        var box = form.querySelector('[data-msg-missing]');
+        box.innerHTML = j.missing.length ? '<div class="notice notice-warn"><div>Some details are not known yet. They are shown in [square brackets]; type them in before sending.</div></div>' : '';
+      });
+  });
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[data-msg-mailto]'); if (!a) return; var form = a.closest('form');
+    a.href = 'mailto:' + encodeURIComponent(a.getAttribute('data-to')) + '?subject=' + encodeURIComponent(form.querySelector('[name=subject]').value) + '&body=' + encodeURIComponent(form.querySelector('[name=body]').value);
+  });
+})();

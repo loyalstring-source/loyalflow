@@ -218,10 +218,10 @@ export function seedDemo(app: App): void {
     screeningNotes(app, hr, a2.id, 'Referred by Aditya. Strong on customer handling, lighter on the technical side. Worth a round with Prasad.');
     closeApplication(app, hr, a4.id, 'rejected', 'Looking for a field sales role, not support. Told her directly and kept her on file for the BDM pipeline.');
 
-    const iv1 = scheduleInterview(app, hr, { applicationId: a1.id, roundType: 'technical', mode: 'in_person', location: 'Pune office, meeting room 2', startsAt: addDays(now, -2).toISOString().slice(0, 16), minutes: 45, panel: [prasad.id, aditya.id], force: true });
+    const iv1 = scheduleInterview(app, hr, { applicationId: a1.id, roundType: 'technical', mode: 'in_person', location: 'Pune office, meeting room 2', startsAt: `${localDateString(addDays(now, -2))}T11:00`, minutes: 45, panel: [prasad.id, aditya.id], force: true });
     setInterviewStatus(app, hr, iv1.id, 'completed');
     saveScorecard(app, prasad, iv1.id, { ratings: { skill: 4, problem: 4, communication: 4, ownership: 3, fit: 4 }, recommendation: 'yes', notes: 'Would need two weeks on our product.', evidence: 'Walked through a GST rate-change bug end to end: checked the tax master first, then the cached rate table, then the invoice print. That is the order we would want.', submit: true });
-    const iv2 = scheduleInterview(app, hr, { applicationId: a3.id, roundType: 'technical', startsAt: addDays(now, 2).toISOString().slice(0, 16), minutes: 45, panel: [prasad.id, karan.id], force: true });
+    const iv2 = scheduleInterview(app, hr, { applicationId: a3.id, roundType: 'technical', startsAt: `${localDateString(addDays(now, 2))}T15:00`, minutes: 45, panel: [prasad.id, karan.id], force: true });
     void iv2;
 
     const offerApp = a1;

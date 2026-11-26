@@ -25,6 +25,7 @@ export interface HireData {
   stats: { openRoles: number; positions: number; activeCandidates: number; interviewsThisWeek: number; offersOut: number; hiredThisQuarter: number };
   requisitions: Requisition[]; pipeline: PipelineCounts[]; myInterviews: Interview[]; scorecardsDue: Interview[]; canRecruit: boolean;
   holds: (Application & { overdue: boolean })[]; onboarding: (Application & { done: number; total: number; gatesOpen: number })[];
+  extras?: { actions: Raw; top: Raw };
 }
 
 export function hirePage(v: View, d: HireData): Raw {
@@ -32,8 +33,9 @@ export function hirePage(v: View, d: HireData): Raw {
   return page(v, {
     title: 'Hiring',
     subtitle: `${d.stats.openRoles} open ${d.stats.openRoles === 1 ? 'role' : 'roles'} · ${d.stats.positions} ${d.stats.positions === 1 ? 'position' : 'positions'} · ${d.stats.activeCandidates} people in play`,
-    actions: html`${when(d.canRecruit, () => html`${button('Settings', { href: '/hire/settings', kind: 'ghost' })}${button('Questions', { href: '/hire/questions' })}${button('Assessments', { href: '/hire/assessments' })}${button('Add candidate', { modal: '/hire/candidates/new', icon: 'plus' })}${button('New vacancy', { modal: '/hire/req/new', kind: 'primary', icon: 'plus' })}`)}`,
+    actions: html`${when(d.canRecruit, () => html`${button('Settings', { href: '/hire/settings', kind: 'ghost' })}`)}${d.extras?.actions || ''}${when(d.canRecruit, () => html`${button('Questions', { href: '/hire/questions' })}${button('Assessments', { href: '/hire/assessments' })}${button('Add candidate', { modal: '/hire/candidates/new', icon: 'plus' })}${button('New vacancy', { modal: '/hire/req/new', kind: 'primary', icon: 'plus' })}`)}`,
     body: html`
+      ${d.extras?.top || ''}
       ${when(d.scorecardsDue.length, () => notice('warn', html`You owe ${d.scorecardsDue.length} scorecard${d.scorecardsDue.length > 1 ? 's' : ''}: ${d.scorecardsDue.map((i) => html`<a href="/hire/interview/${i.id}">${i.candidate_name}</a> `)}`))}
       <div class="grid grid-4">
         ${statCard({ value: d.stats.openRoles, label: 'Open roles', sub: `${d.stats.positions} positions` })}
@@ -217,7 +219,7 @@ export interface ApplicationData {
   decisions: HiringDecision[]; onboarding: Onboarding | undefined; onboardingItems: OnboardingItem[];
   assessments: Invitation[]; messages: HireMessage[]; canAssess: boolean;
   /** Cards from the sourcing and screening features, rendered by hire-extra.ts. */
-  extraMain?: Raw; extraSide?: Raw;
+  extraMain?: Raw; extraSide?: Raw; extraActions?: Raw;
 }
 
 export function applicationPage(v: View, d: ApplicationData): Raw {
@@ -232,7 +234,7 @@ export function applicationPage(v: View, d: ApplicationData): Raw {
   return page(v, {
     title: c.full_name,
     subtitle: html`${d.req.title} · ${a.source} · in ${STAGE_LABEL[a.stage]} since ${fmtDate(a.stage_since)}`,
-    actions: html`${stagePill(a.stage)}${when(held, () => pill('On hold', 'warn'))}
+    actions: html`${stagePill(a.stage)}${when(held, () => pill('On hold', 'warn'))}${d.extraActions || ''}
       ${when(manual && d.canRecruit, () => html`${button('Schedule interview', { modal: `/hire/app/${a.id}/schedule`, icon: 'calendar' })}${button('Record decision', { modal: `/hire/app/${a.id}/decision`, kind: 'primary' })}`)}
       ${when(live && a.stage === 'offer' && d.canRecruit && !d.offers.some((o) => ['draft', 'issued'].includes(o.status)), () => button('Draft offer', { modal: `/hire/app/${a.id}/offer`, kind: 'primary' }))}
       ${when(a.status === 'closed', () => pill(outcomeLabel(a.outcome), a.outcome === 'hired' ? 'good' : 'ink'))}`,
@@ -520,11 +522,12 @@ function scorecardView(s: Scorecard): Raw {
   </div>`;
 }
 
-export function rescheduleModal(v: View, i: Interview): Raw {
+export function rescheduleModal(v: View, i: Interview, at = ''): Raw {
+  const was = Math.max(15, Math.round((new Date(i.ends_at).getTime() - new Date(i.starts_at).getTime()) / 60_000));
   return modal({
     title: `Move round ${i.round}`,
     body: html`<form data-post="/hire/interview/${i.id}/reschedule" class="stack">
-      <div class="grid grid-2">${field('New date and time', input('startsAt', { type: 'datetime-local', required: true }))}${field('Minutes', input('minutes', { type: 'number', min: 15, step: 15, value: 45 }))}</div>
+      <div class="grid grid-2">${field('New date and time', input('startsAt', { type: 'datetime-local', required: true, value: at }))}${field('Minutes', input('minutes', { type: 'number', min: 15, step: 15, value: was }))}</div>
       ${field('Why', input('reason', { required: true, placeholder: 'Panel clash, candidate asked to move' }))}
       <label class="row small" style="gap:8px"><input type="checkbox" name="force" value="1"> Move even if someone is already booked</label>
       <div class="row right">${button('Cancel', { kind: 'ghost', cls: 'js-close-modal' })}${button('Move it', { type: 'submit', kind: 'primary' })}</div>

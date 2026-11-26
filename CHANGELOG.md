@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.30.0 — 26 November 2026
+
+Hiring, second round. Six additions for HR.
+
+- **Public Apply link for each vacancy.** HR turns it on from the vacancy page and shares the link (copy, WhatsApp, LinkedIn). Anyone can apply without signing in: details, CV (PDF or Word, 5 MB) and consent. The application lands in the vacancy as "Applied" with source "Apply link", the CV is read and attached, and the recruiter is notified. A person already on record (same email) is matched, not duplicated. The salary budget is never shown. Protected against scripts and floods; "New link" stops an old link; the page closes by itself when the vacancy is not open.
+- **Time limits per stage, with an overdue list.** Hiring → Overdue shows who has waited longer than the limit, by stage, with a Message button. HR sets the days for each stage (0 = no limit). The recruiter gets one reminder when a candidate goes over. The candidate page shows the waiting time.
+- **Interactive interview calendar.** Hiring → Calendar, week and month views. Drag an interview to another day or time to move it (a reason is asked), click an empty time to book, drag a waiting candidate onto a slot, click an interview for details. Filters by interviewer and vacancy, interviewer load, overlapping interviews shown side by side. Interviewers see only their own interviews.
+- **Dynamic message templates.** Hiring → Templates: seven standard templates plus your own. Click a field (candidate, role, interview date and time, panel, offer salary, joining date…) to drop it in, with a live preview. "Message" on a candidate fills everything in; anything not known yet is shown in [brackets] and cannot be sent blank. Sends through Microsoft 365 when connected; until then it opens in HR's own mail and is recorded.
+- **More hiring reports**, all with Excel export: Source by stage, Waiting time and overdue, Days spent in each stage, Vacancy summary, Interviews by interviewer, Work by recruiter, Why candidates were closed, Applications week by week, Messages to candidates.
+- **Merging duplicate candidates.** Hiring → Duplicates lists records with the same email, phone or name. Compare side by side, choose what to keep on each line, and merge: applications, interviews and messages move to the kept record; the other is hidden (not deleted) and the merge is in the audit log. "Not the same person" removes a pair from the list.
+
+Fixes
+
+- Interview times typed into a form are now always treated as India time, whatever clock the server runs on. On a server set to UTC they were stored 5½ hours late.
+- Adding a candidate to a vacancy that is not open no longer leaves a half-added candidate behind.
+- Hiring reports show sources with consistent capital letters.
+
 ## 1.29.0 — 25 Nov 2026
 A new app menu (the grid button beside the section name).
 - **It scrolls.** The menu was cut off on smaller screens, so Company and Settings could not be reached. It now fits the window and scrolls inside.

@@ -78,7 +78,7 @@ const HEAD = (title: string) => html`<meta charset="utf-8"><meta name="viewport"
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="/static/theme.css?v=${ASSET_V}">`;
 
-export const ASSET_V = '34';
+export const ASSET_V = '35';
 
 /** The modules of the app, each with its own tabs. A person sees a module when their role lets them into at least one of its tabs. */
 interface ModuleDef { key: string; name: string; icon: string; tone: string; tabs: string[] }

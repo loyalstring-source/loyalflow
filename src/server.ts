@@ -42,6 +42,7 @@ import * as hr from './routes/hr.ts';
 import * as hire from './routes/hire.ts';
 import * as assess from './routes/assess.ts';
 import * as hireExtra from './routes/hire-extra.ts';
+import * as hirePlus from './routes/hire-plus.ts';
 import * as attendanceRoutes from './routes/attendance.ts';
 import { registerApi, registerPublicApi } from './routes/api.ts';
 import { html } from './lib/html.ts';
@@ -83,6 +84,7 @@ export function createServer(app: App, opts: { log?: (line: string) => void } = 
   registerPublic(pub, app);
   registerPublicApi(pub, app);
   assess.registerPublic(pub, app);
+  hirePlus.registerPublic(pub, app);
   estimatesRoutes.registerPublic(pub, app);
   attendanceRoutes.registerPublic(pub, app);
 
@@ -112,6 +114,7 @@ export function createServer(app: App, opts: { log?: (line: string) => void } = 
   hire.register(auth, app);
   assess.register(auth, app);
   hireExtra.register(auth, app);
+  hirePlus.register(auth, app);
   attendanceRoutes.register(auth, app);
   registerApi(auth, app);
   auth.get('/search', (ctx) => {
