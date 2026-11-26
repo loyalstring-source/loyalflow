@@ -16,13 +16,13 @@ import { hirePage, requisitionModal, requisitionPage, candidatesPage, candidateM
 import { getSetting } from '../lib/settings.ts';
 import { invitationsOf, messagesOf, canIssue } from '../modules/hr/assessment.ts';
 import { screeningFor, planTrack, planOf, setFor, screeningTotals } from '../modules/hr/screening.ts';
-import { cvOf, aiSettings } from '../modules/hr/cv.ts';
+import { cvOf, aiSettings, uploadCv } from '../modules/hr/cv.ts';
 import { screeningCard, planCard, cvCard, vacancyExtras } from '../ui/pages/hire-extra.ts';
 import { html, when } from '../lib/html.ts';
 import { page } from '../ui/layout.ts';
 import { empty, button } from '../ui/components.ts';
 import { applyLink, overdue, duplicatePairs, aging } from '../modules/hr/hire-plus.ts';
-import { applyLinkCard, hireHomeExtras, agePill } from '../ui/pages/hire-plus.ts';
+import { applyLinkCard, hireHomeExtras, agePill, uploadChooserModal } from '../ui/pages/hire-plus.ts';
 import { done, fail, view, user, str, num } from './helpers.ts';
 
 function requireRecruiter(app: App, e: Employee): void {
@@ -115,9 +115,14 @@ export function register(r: Router<Employee>, app: App): void {
       extraSide: (() => { const p = planOf(app, req.id); const qs = setFor(app, req.id); const link = applyLink(app, req.id); return html`${applyLinkCard({ req, link, url: `${app.cfg.baseUrl}/apply/${link.token || ''}`, canEdit: rec })}${vacancyExtras({ req, steps: p.steps, planOwn: p.own, questions: qs.questions.length, points: qs.questions.reduce((n, q) => n + q.maxPoints, 0), questionsOwn: qs.own, canEdit: rec })}`; })()
     }));
   });
+  // "Upload CVs" from the hiring home: choose which open vacancy the CVs are for.
+  r.get('/hire/upload', (ctx) => {
+    const v = view(ctx); requireRecruiter(app, v.user);
+    return htmlResponse(uploadChooserModal(listRequisitions(app, { status: ['open'] })));
+  });
   r.get('/hire/req/:id/add', (ctx) => {
     const v = view(ctx); requireRecruiter(app, v.user);
-    return htmlResponse(candidateModal(v, { openRoles: listRequisitions(app, { status: ['open'] }) }));
+    return htmlResponse(candidateModal(v, { openRoles: listRequisitions(app, { status: ['open'] }), requisitionId: ctx.params.id }));
   });
 
   // ---- Candidates ----
@@ -145,15 +150,21 @@ export function register(r: Router<Employee>, app: App): void {
       // Check the vacancy before saving the person, so a refused vacancy does not leave a half-added candidate behind.
       if (reqId) { const rq = getRequisition(app, reqId); if (!rq) throw new HttpError(404, 'Vacancy not found.'); if (rq.status !== 'open') throw new HttpError(400, rq.status === 'paused' ? 'That vacancy is paused. Resume it before adding people.' : rq.status === 'draft' ? 'That vacancy is still a draft. Open it first.' : 'That vacancy is not open.'); }
       const c = saveCandidate(app, me, { fullName: str(b, 'fullName'), email: str(b, 'email'), phone: str(b, 'phone'), currentEmployer: str(b, 'currentEmployer'), experienceYears: num(b, 'experienceYears'), currentCtc: num(b, 'currentCtc'), expectedCtc: num(b, 'expectedCtc'), noticeDays: num(b, 'noticeDays'), location: str(b, 'location'), notes: str(b, 'notes') });
-      if (reqId) { const a = addApplication(app, me, { candidateId: c.id, requisitionId: reqId, source: str(b, 'source') || 'direct' }); return done(ctx, { redirect: `/hire/app/${a.id}`, toast: { title: 'Candidate added', body: `${c.full_name} is on the role.`, kind: 'success' } }); }
-      return done(ctx, { redirect: '/hire/candidates', toast: { title: 'Candidate saved', kind: 'success' } });
+      // A CV chosen in the same form is stored and read now. If it cannot be stored, the candidate is still saved and HR is told.
+      let cvNote = '';
+      if (typeof b.cv === 'string' && b.cv) {
+        try { const r2 = await uploadCv(app, me, c.id, str(b, 'cvName') || 'cv.pdf', Buffer.from(b.cv.replace(/^data:[^,]*,/, ''), 'base64')); cvNote = r2.source === 'none' ? ' The CV is saved but could not be read.' : ' CV saved and read.'; }
+        catch (e) { if (!(e instanceof HttpError)) throw e; cvNote = ` The CV was not saved: ${e.message}`; }
+      }
+      if (reqId) { const a = addApplication(app, me, { candidateId: c.id, requisitionId: reqId, source: str(b, 'source') || 'direct' }); return done(ctx, { redirect: `/hire/app/${a.id}`, toast: { title: 'Candidate added', body: `${c.full_name} is on the role.${cvNote}`, kind: 'success' } }); }
+      return done(ctx, { redirect: '/hire/candidates', toast: { title: 'Candidate saved', body: cvNote.trim() || undefined, kind: 'success' } });
     } catch (e) { if (e instanceof HttpError) return fail(ctx, e.status, e.message); throw e; }
   });
   r.get('/hire/candidate/:id', (ctx) => {
     const v = view(ctx); requireRecruiter(app, v.user);
     const c = getCandidate(app, ctx.params.id);
     if (!c) throw new HttpError(404, 'Candidate not found.');
-    return htmlResponse(candidateDrawer(v, { c, apps: listApplications(app, { candidateId: c.id }) }));
+    return htmlResponse(candidateDrawer(v, { c, apps: listApplications(app, { candidateId: c.id }), cvName: cvOf(app, c.id)?.name || '' }));
   });
 
   // ---- Applications ----

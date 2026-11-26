@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.30.4 — 26 November 2026
+
+CV upload is easier to find.
+
+- **"Add candidate" now has a CV field.** Choose the file while adding the person; LoyalFlow stores it, writes the summary and fills in any details left blank (phone, employer, experience, location). If the file cannot be stored the candidate is still saved and you are told why.
+- **"Upload CVs" button on the Hiring home page.** Pick the vacancy, then drop many CVs at once. Before, this button was only on each vacancy's own page.
+- "Add candidate" opened from a vacancy now has that vacancy already chosen.
+- The candidate side panel shows the CV with a link to open it.
+- The public Apply page no longer offers old .doc files, which LoyalFlow cannot read; it asks for PDF or .docx.
+
 ## 1.30.3 — 26 November 2026
 
 - **"Set password" on a person's page** (administrators only). Gives the person a temporary password, with a suggestion already filled in. They sign in with it and must choose their own straight away, so nobody else knows the password they use. Their other sign-ins are ended and the action is in the audit log. It cannot be used on your own account or on another administrator's.

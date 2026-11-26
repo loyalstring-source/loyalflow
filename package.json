@@ -1,6 +1,6 @@
 {
   "name": "loyalflow",
-  "version": "1.30.3",
+  "version": "1.30.4",
   "description": "LoyalFlow: Loyal String's workforce management platform (service desk, sales, production, people, SOPs and KPIs with one company page).",
   "private": true,
   "type": "module",

@@ -70,6 +70,24 @@ describe('public Apply link', () => {
   });
 });
 
+describe('CV upload when adding a candidate', () => {
+  test('the Add candidate form takes a CV, stores it and fills blanks; the home page offers bulk upload', async () => {
+    const hr = await login(HR); const req = openReq();
+    const modalHtml = await (await hr.get(`/hire/req/${req.id}/add`)).text(); assert.ok(modalHtml.includes('type="file" name="cv"') && new RegExp(`value="${req.id}" selected`).test(modalHtml), 'CV field, and the vacancy is already chosen');
+    const cv = docx('Farhan Sheikh\nfarhan.sheikh@example.com | 9811122233 | Nagpur\nImplementation engineer with 4 years of experience at Demo Retail Systems.\nSkills: SQL, Excel');
+    const res = await hr.postJson('/hire/candidates', { fullName: 'Farhan Sheikh', email: 'farhan.sheikh@example.com', requisitionId: req.id, source: 'naukri', cv, cvName: 'farhan.docx' }); assert.equal(res.status, 200); assert.match(res.json.toast.body, /CV saved/);
+    const a = getApplication(s.app, /APP-\d+/.exec(res.json.redirect)![0])!; const stored = cvOf(s.app, a.candidate_id)!; assert.equal(stored.name, 'farhan.docx');
+    assert.equal(getCandidate(s.app, a.candidate_id)!.phone, '9811122233', 'the phone left blank in the form is taken from the CV');
+    assert.equal((await hr.get(`/hire/candidates/${a.candidate_id}/cv`)).status, 200);
+    // A file that is not a CV does not lose the candidate.
+    const bad = await hr.postJson('/hire/candidates', { fullName: 'Gauri Naik', email: 'gauri.naik@example.com', cv: Buffer.from('MZ').toString('base64'), cvName: 'x.exe' }); assert.equal(bad.status, 200); assert.match(bad.json.toast.body, /not saved/);
+    assert.ok(s.app.db.get('SELECT id FROM candidates WHERE email = ?', ['gauri.naik@example.com']));
+    const home = await (await hr.get('/hire')).text(); assert.ok(home.includes('/hire/upload'));
+    const chooser = await (await hr.get('/hire/upload')).text(); assert.ok(chooser.includes(`/hire/req/${req.id}/bulk`));
+    const ic = await login(SUPPORT_IC); assert.equal((await ic.get('/hire/upload')).status, 403);
+  });
+});
+
 describe('time limits and overdue', () => {
   test('a candidate past the limit is listed, reminded once, and limits can be changed', async () => {
     const hr = await login(HR); const a = fresh();

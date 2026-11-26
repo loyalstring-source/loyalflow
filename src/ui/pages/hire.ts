@@ -195,17 +195,18 @@ export function candidatesPage(v: View, d: { rows: (Candidate & { applications?:
   });
 }
 
-export function candidateModal(v: View, d: { openRoles: Requisition[]; duplicates?: Candidate[]; draft?: Record<string, string> }): Raw {
+export function candidateModal(v: View, d: { openRoles: Requisition[]; duplicates?: Candidate[]; draft?: Record<string, string>; requisitionId?: string }): Raw {
   return modal({
     title: 'Add a candidate',
     body: html`<form data-post="/hire/candidates" class="stack">
       ${when(d.duplicates && d.duplicates.length, () => notice('warn', html`We may already have this person: ${d.duplicates!.map((c) => html`<a href="/hire/candidate/${c.id}">${c.full_name}</a> `)}`))}
+      ${field('CV', html`<input class="input" type="file" name="cv" accept=".pdf,.docx,.txt" style="padding:8px">`, 'PDF or Word (.docx), up to 5 MB. LoyalFlow reads it, writes a summary and fills in any details you leave blank below.')}
       ${field('Full name', input('fullName', { required: true }))}
       <div class="grid grid-2">${field('Email', input('email', { type: 'email' }))}${field('Phone', input('phone'))}</div>
       <div class="grid grid-2">${field('Currently at', input('currentEmployer'))}${field('Experience in years', input('experienceYears', { type: 'number', step: '0.5', min: 0 }))}</div>
       <div class="grid grid-2">${field('Current CTC', input('currentCtc', { type: 'number', min: 0, step: 1000 }))}${field('Expected CTC', input('expectedCtc', { type: 'number', min: 0, step: 1000 }))}</div>
       <div class="grid grid-2">${field('Notice period in days', input('noticeDays', { type: 'number', min: 0 }))}${field('Location', input('location'))}</div>
-      ${field('Apply to', select('requisitionId', d.openRoles.map((r) => ({ value: r.id, label: `${r.title} · ${r.department || r.department_id}` })), { blank: 'Just add to the list for now' }))}
+      ${field('Apply to', select('requisitionId', d.openRoles.map((r) => ({ value: r.id, label: `${r.title} · ${r.department || r.department_id}`, selected: r.id === d.requisitionId })), { blank: 'Just add to the list for now' }))}
       ${field('Where they came from', select('source', lists.options('hire.sources').map((s) => ({ value: s.label.toLowerCase(), label: s.label })), { blank: 'Choose' }))}
       ${field('Notes', textarea('notes', { rows: 3, placeholder: 'First impressions, who referred them, anything worth remembering.' }))}
       <div class="row right">${button('Cancel', { kind: 'ghost', cls: 'js-close-modal' })}${button('Save candidate', { type: 'submit', kind: 'primary' })}</div>
@@ -535,7 +536,7 @@ export function rescheduleModal(v: View, i: Interview, at = ''): Raw {
   });
 }
 
-export function candidateDrawer(v: View, d: { c: Candidate; apps: Application[] }): Raw {
+export function candidateDrawer(v: View, d: { c: Candidate; apps: Application[]; cvName?: string }): Raw {
   return drawer({
     title: d.c.full_name,
     meta: html`${d.c.email} · ${d.c.phone}`,
@@ -543,7 +544,8 @@ export function candidateDrawer(v: View, d: { c: Candidate; apps: Application[] 
       { label: 'Now at', value: d.c.current_employer || '—' },
       { label: 'Experience', value: d.c.experience_years == null ? '—' : `${d.c.experience_years} years` },
       { label: 'Current CTC', value: money(d.c.current_ctc) }, { label: 'Expected', value: money(d.c.expected_ctc) },
-      { label: 'Notice', value: d.c.notice_days == null ? '—' : `${d.c.notice_days} days` }
+      { label: 'Notice', value: d.c.notice_days == null ? '—' : `${d.c.notice_days} days` },
+      { label: 'CV', value: d.cvName ? html`<a href="/hire/candidates/${d.c.id}/cv" target="_blank" rel="noopener">${d.cvName}</a>` : d.apps.length ? html`<span class="muted">None yet. Open an application below to upload one.</span>` : html`<span class="muted">None yet</span>` }
     ])}
     <h3 class="small" style="margin-top:14px">Applications</h3>
     ${d.apps.length ? html`<div class="list">${d.apps.map((a) => html`<a class="list-row" href="/hire/app/${a.id}"><span>${a.requisition_title}</span>${stagePill(a.stage)}</a>`)}</div>` : empty('None yet.')}

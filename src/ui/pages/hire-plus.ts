@@ -55,8 +55,8 @@ export function applyPage(d: { req: Requisition; intro: string; token: string })
           ${field('Notice period (days)', input('noticeDays', { type: 'number', min: 0, max: 365 }))}
         </div>
         ${field('How did you hear about this role?', select('heardFrom', ['Company website', 'LinkedIn', 'Naukri', 'Indeed', 'A friend or employee', 'College', 'Other'].map((x) => ({ value: x, label: x })), { blank: 'Choose one' }))}
-        ${field('Your CV *', html`<label class="apply-drop" id="apply-drop"><input type="file" name="cv" accept=".pdf,.doc,.docx" required>
-          <b id="apply-file">Choose a file, or drop it here</b><span class="xs muted">PDF or Word, up to 5 MB</span></label>`)}
+        ${field('Your CV *', html`<label class="apply-drop" id="apply-drop"><input type="file" name="cv" accept=".pdf,.docx" required>
+          <b id="apply-file">Choose a file, or drop it here</b><span class="xs muted">PDF or Word (.docx), up to 5 MB</span></label>`)}
         <div class="apply-hp" aria-hidden="true"><label>Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
         <label class="apply-consent"><input type="checkbox" name="consent" value="1" required> <span>I agree that Loyal String may keep these details and my CV to consider me for this and similar roles. I can ask for them to be deleted at any time.</span></label>
         <div class="row right">${button('Send application', { type: 'submit', kind: 'primary', size: 'lg' })}</div>
@@ -408,8 +408,22 @@ export function mergePage(v: View, d: { a: Cand; b: Cand; appsA: Application[]; 
 /** Buttons and alerts added to the hiring home page. */
 export function hireHomeExtras(d: { canRecruit: boolean; overdue: number; duplicates: number; viaLink: number }): { actions: Raw; top: Raw } {
   return {
-    actions: html`${button('Calendar', { href: '/hire/calendar', icon: 'calendar' })}${when(d.canRecruit, () => html`${button('Overdue', { href: '/hire/overdue' })}${button('Templates', { href: '/hire/templates' })}${button('Duplicates', { href: '/hire/duplicates' })}`)}`,
+    actions: html`${button('Calendar', { href: '/hire/calendar', icon: 'calendar' })}${when(d.canRecruit, () => html`${button('Upload CVs', { modal: '/hire/upload' })}${button('Overdue', { href: '/hire/overdue' })}${button('Templates', { href: '/hire/templates' })}${button('Duplicates', { href: '/hire/duplicates' })}`)}`,
     top: html`${when(d.canRecruit && d.overdue, () => notice('warn', html`<b>${plural(d.overdue, 'candidate')}</b> ${d.overdue === 1 ? 'has' : 'have'} waited longer than the time limit. <a href="/hire/overdue">See who</a>`))}
       ${when(d.canRecruit && d.duplicates, () => notice('accent', html`<b>${plural(d.duplicates, 'pair')}</b> of candidate records look like the same person. <a href="/hire/duplicates">Compare and merge</a>`))}`
   };
+}
+
+/** Chosen from the hiring home: which vacancy are these CVs for? */
+export function uploadChooserModal(open: Requisition[]): Raw {
+  return modal({
+    title: 'Upload CVs',
+    body: html`<div class="stack">
+      <p class="small muted">Choose the vacancy the CVs are for. You can then drop many files at once; LoyalFlow reads each one, shows you what it found, and adds them as candidates when you confirm.</p>
+      ${open.length ? html`<div class="list">${open.map((r) => html`<a class="list-row" href="/hire/req/${r.id}/bulk"><span><b>${r.title}</b> <span class="muted small">· ${r.department || ''}</span></span><span class="btn btn-sm">Upload here</span></a>`)}</div>`
+        : notice('warn', 'There is no open vacancy. Open a vacancy first; CVs are always uploaded against a vacancy.')}
+      <p class="xs muted">For one person, use “Add candidate”: it has a CV field too.</p>
+      <div class="row right">${button('Close', { kind: 'ghost', cls: 'js-close-modal' })}</div>
+    </div>`
+  });
 }
