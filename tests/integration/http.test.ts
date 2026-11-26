@@ -1,4 +1,4 @@
-import { test, after, before } from 'node:test';
+import { test, describe, after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { startServer, Client, COO, SUPPORT_IC, SUPPORT_LEAD, BDM, PRODUCTION_LEAD, HR, DEV_LEAD, PASSWORD, type TestServer } from '../helpers.ts';
 import { listTickets } from '../../src/modules/desk/service.ts';
@@ -147,4 +147,23 @@ test('password reset by email link works once', async () => {
   const twice = await c.postForm('/reset-password', { _csrf: csrf2, token: token!, password: 'Another-Pass-2026x', password2: 'Another-Pass-2026x' });
   assert.equal(twice.status, 400, 'token cannot be reused');
   assert.equal((await new Client(srv.base).login(HR, 'Reset-Pass-2026x')).status, 303);
+});
+
+describe('compression and caching', () => {
+  test('pages and static text are gzipped when the browser accepts it, and static files can be revalidated', async () => {
+    const s2 = await startServer();
+    try {
+      const plain = await fetch(`${s2.base}/static/theme.css?v=1`, { headers: { 'accept-encoding': 'identity' } });
+      assert.equal(plain.headers.get('content-encoding'), null); assert.match(plain.headers.get('cache-control') || '', /immutable/);
+      const etag = plain.headers.get('etag')!; assert.ok(etag); const css = await plain.text();
+      const zipped = await fetch(`${s2.base}/static/theme.css?v=1`, { headers: { 'accept-encoding': 'gzip' } });
+      assert.equal(zipped.headers.get('content-encoding'), 'gzip'); assert.equal(await zipped.text(), css, 'the same file after unzipping');
+      assert.equal((await fetch(`${s2.base}/static/theme.css?v=1`, { headers: { 'if-none-match': etag } })).status, 304);
+      assert.doesNotMatch((await fetch(`${s2.base}/static/theme.css`)).headers.get('cache-control') || '', /immutable/, 'without a version stamp the file is kept for a day only');
+      assert.equal((await fetch(`${s2.base}/sw.js`)).headers.get('cache-control'), 'no-cache');
+      const login = await fetch(`${s2.base}/login`, { headers: { 'accept-encoding': 'gzip' } });
+      assert.equal(login.headers.get('content-encoding'), 'gzip'); assert.ok((await login.text()).includes('<form'));
+      const png = await fetch(`${s2.base}/static/ls-mark.png`, { headers: { 'accept-encoding': 'gzip' } }); assert.equal(png.headers.get('content-encoding'), null, 'images are already compressed');
+    } finally { await s2.close(); }
+  });
 });

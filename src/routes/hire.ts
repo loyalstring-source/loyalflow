@@ -112,7 +112,7 @@ export function register(r: Router<Employee>, app: App): void {
     return htmlResponse(requisitionPage(v, {
       req, applications: listApplications(app, { requisitionId: req.id, limit: 300 }), pipeline: pipelineCounts(app, req.id),
       canRecruit: rec, canSubmit: req.status === 'draft' && rec, canAssess: canIssue(app).ok, screening: screeningTotals(app, req.id),
-      extraSide: (() => { const p = planOf(app, req.id); const qs = setFor(app, req.id); return html`${applyLinkCard({ req, link: applyLink(app, req.id), url: `${app.cfg.baseUrl}/apply/${applyLink(app, req.id).token || ''}`, canEdit: rec })}${vacancyExtras({ req, steps: p.steps, planOwn: p.own, questions: qs.questions.length, points: qs.questions.reduce((n, q) => n + q.maxPoints, 0), questionsOwn: qs.own, canEdit: rec })}`; })()
+      extraSide: (() => { const p = planOf(app, req.id); const qs = setFor(app, req.id); const link = applyLink(app, req.id); return html`${applyLinkCard({ req, link, url: `${app.cfg.baseUrl}/apply/${link.token || ''}`, canEdit: rec })}${vacancyExtras({ req, steps: p.steps, planOwn: p.own, questions: qs.questions.length, points: qs.questions.reduce((n, q) => n + q.maxPoints, 0), questionsOwn: qs.own, canEdit: rec })}`; })()
     }));
   });
   r.get('/hire/req/:id/add', (ctx) => {
@@ -124,10 +124,11 @@ export function register(r: Router<Employee>, app: App): void {
   r.get('/hire/candidates', (ctx) => {
     const v = view(ctx); requireRecruiter(app, v.user);
     const q = (ctx.query.get('q') || '').trim();
-    const rows = q
-      ? app.db.all<Candidate>("SELECT * FROM candidates WHERE merged_into IS NULL AND (lower(full_name) LIKE ? OR email_normalized LIKE ? OR phone LIKE ?) ORDER BY created_at DESC LIMIT 200", [`%${q.toLowerCase()}%`, `%${q.toLowerCase()}%`, `%${q}%`])
-      : app.db.all<Candidate>('SELECT * FROM candidates WHERE merged_into IS NULL ORDER BY created_at DESC LIMIT 200');
-    const withCounts = rows.map((c) => ({ ...c, applications: app.db.get<{ n: number }>('SELECT count(*) AS n FROM applications WHERE candidate_id = ?', [c.id])?.n || 0 }));
+    // One query, with the number of applications counted alongside, instead of one extra query per person.
+    const COLS = 'c.*, (SELECT count(*) FROM applications a WHERE a.candidate_id = c.id) AS applications';
+    const withCounts = q
+      ? app.db.all<Candidate & { applications: number }>(`SELECT ${COLS} FROM candidates c WHERE c.merged_into IS NULL AND (lower(c.full_name) LIKE ? OR c.email_normalized LIKE ? OR c.phone LIKE ?) ORDER BY c.created_at DESC LIMIT 200`, [`%${q.toLowerCase()}%`, `%${q.toLowerCase()}%`, `%${q}%`])
+      : app.db.all<Candidate & { applications: number }>(`SELECT ${COLS} FROM candidates c WHERE c.merged_into IS NULL ORDER BY c.created_at DESC LIMIT 200`);
     return htmlResponse(candidatesPage(v, { rows: withCounts, q }));
   });
   r.get('/hire/candidates/new', (ctx) => {

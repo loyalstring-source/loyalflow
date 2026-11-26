@@ -1368,5 +1368,14 @@ ALTER TABLE candidates ADD COLUMN merged_at TEXT;
 ALTER TABLE candidates ADD COLUMN merged_by TEXT REFERENCES employees(id);
 CREATE TABLE candidate_not_duplicates (a TEXT NOT NULL, b TEXT NOT NULL, by TEXT REFERENCES employees(id), at TEXT NOT NULL, PRIMARY KEY (a, b));
 `
+  },
+  {
+    id: '0024_hiring_indexes',
+    sql: `
+-- Lookups the calendar, the overdue list and the interviewer's own list make on every page load.
+CREATE INDEX IF NOT EXISTS idx_interviews_starts ON interviews(starts_at);
+CREATE INDEX IF NOT EXISTS idx_interview_panel_person ON interview_panel(interviewer_id);
+CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status, stage_since);
+`
   }
 ];

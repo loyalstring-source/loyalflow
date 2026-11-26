@@ -3,6 +3,7 @@ import { createServer as createHttpServer, type IncomingMessage, type ServerResp
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 import { createApp, type App } from './app.ts';
 import { Router, makeCtx, send, redirect, json, htmlResponse, HttpError, type Response, type Ctx } from './lib/http.ts';
 import { userForToken, csrfToken, csrfValid } from './lib/auth.ts';
@@ -58,12 +59,25 @@ const ROOT = join(fileURLToPath(import.meta.url), '..', '..');
 const PUBLIC_DIR = join(ROOT, 'public');
 const MIME: Record<string, string> = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8' };
 
-function serveFile(base: string, rel: string, cache: string): Response | null {
+/** Files from disk, kept in memory with their gzipped form until the file changes. */
+const fileCache = new Map<string, { mtimeMs: number; size: number; body: Buffer; gzipped?: Buffer; etag: string }>();
+const TEXT_FILE = /\.(css|js|svg|json|webmanifest|txt|html)$/i;
+function serveFile(base: string, rel: string, cache: string, ifNoneMatch = ''): Response | null {
   const safe = normalize(rel).replace(/^(\.\.[/\\])+/, '');
   const path = join(base, safe);
-  if (!path.startsWith(base) || !existsSync(path) || !statSync(path).isFile()) return null;
+  if (!path.startsWith(base) || !existsSync(path)) return null;
+  const st = statSync(path); if (!st.isFile()) return null;
   const type = MIME[extname(path).toLowerCase()] || 'application/octet-stream';
-  return { status: 200, headers: { 'content-type': type, 'cache-control': cache }, body: readFileSync(path) };
+  let hit = fileCache.get(path);
+  if (!hit || hit.mtimeMs !== st.mtimeMs || hit.size !== st.size) {
+    const body = readFileSync(path);
+    hit = { mtimeMs: st.mtimeMs, size: st.size, body, gzipped: TEXT_FILE.test(path) && body.length >= 1024 ? gzipSync(body) : undefined, etag: `"${st.size.toString(36)}-${Math.round(st.mtimeMs).toString(36)}"` };
+    // Only small, often-asked files are kept; uploads can be large and are read each time.
+    if (base === PUBLIC_DIR && body.length < 2_000_000) fileCache.set(path, hit);
+  }
+  const headers = { 'content-type': type, 'cache-control': cache, etag: hit.etag };
+  if (ifNoneMatch && ifNoneMatch === hit.etag) return { status: 304, headers, body: '' };
+  return { status: 200, headers, body: hit.body, gzipped: hit.gzipped };
 }
 
 export function buildView(app: App, user: Employee, csrf: string, path: string): View {
@@ -143,8 +157,8 @@ export function createServer(app: App, opts: { log?: (line: string) => void } = 
     let out: Response | null = null;
     try {
       // 1. Static assets (no session needed)
-      if (ctx.path.startsWith('/static/')) out = serveFile(PUBLIC_DIR, ctx.path.slice('/static/'.length), 'public, max-age=86400') || { status: 404, headers: { 'content-type': 'text/plain' }, body: 'Not found' };
-      else if (ctx.path === '/manifest.webmanifest' || ctx.path === '/sw.js' || ctx.path === '/robots.txt' || ctx.path === '/favicon.ico') out = serveFile(PUBLIC_DIR, ctx.path === '/favicon.ico' ? 'icon.svg' : ctx.path.slice(1), 'public, max-age=3600') || { status: 404, headers: { 'content-type': 'text/plain' }, body: 'Not found' };
+      if (ctx.path.startsWith('/static/')) out = serveFile(PUBLIC_DIR, ctx.path.slice('/static/'.length), ctx.query.has('v') ? 'public, max-age=31536000, immutable' : 'public, max-age=86400', String(req.headers['if-none-match'] || '')) || { status: 404, headers: { 'content-type': 'text/plain' }, body: 'Not found' };
+      else if (ctx.path === '/manifest.webmanifest' || ctx.path === '/sw.js' || ctx.path === '/robots.txt' || ctx.path === '/favicon.ico') out = serveFile(PUBLIC_DIR, ctx.path === '/favicon.ico' ? 'icon.svg' : ctx.path.slice(1), ctx.path === '/sw.js' ? 'no-cache' : 'public, max-age=3600', String(req.headers['if-none-match'] || '')) || { status: 404, headers: { 'content-type': 'text/plain' }, body: 'Not found' };
       if (out) { send(res, out, ctx.setCookies); return; }
 
       // 2. Session: cookie (web) or bearer token (mobile/API)

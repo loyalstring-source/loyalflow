@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { gzipSync } from 'node:zlib';
 import type { Raw } from './html.ts';
 
 export class HttpError extends Error {
@@ -11,6 +12,8 @@ export interface Response {
   status: number;
   headers: Record<string, string | string[]>;
   body: string | Uint8Array;
+  /** The body already gzipped, when the caller keeps one ready (static files). */
+  gzipped?: Uint8Array;
 }
 
 export function htmlResponse(body: Raw | string, status = 200, headers: Record<string, string> = {}): Response {
@@ -188,12 +191,25 @@ export function makeCtx<User>(req: IncomingMessage, res: ServerResponse, baseUrl
   };
 }
 
+const COMPRESSIBLE = /^(text\/|application\/(json|javascript|manifest\+json)|image\/svg)/;
+/** Pages and scripts are text and shrink to about a fifth of their size; on a phone connection that is most of the wait. */
+function compress(res: ServerResponse, r: Response, headers: Record<string, string | string[]>): string | Uint8Array | undefined {
+  const body = r.body as string | Uint8Array | undefined;
+  if (body === undefined || body === null || headers['content-encoding']) return body;
+  const accepts = String((res as ServerResponse & { req?: IncomingMessage }).req?.headers['accept-encoding'] || '');
+  const size = typeof body === 'string' ? Buffer.byteLength(body) : body.length;
+  if (size < 1024 || !/\bgzip\b/.test(accepts) || !COMPRESSIBLE.test(String(headers['content-type'] || ''))) return body;
+  headers['content-encoding'] = 'gzip'; headers['vary'] = 'Accept-Encoding';
+  return r.gzipped || gzipSync(body);
+}
+
 export function send(res: ServerResponse, r: Response, setCookies: string[] = []): void {
   const headers: Record<string, string | string[]> = { ...r.headers };
   if (setCookies.length) headers['set-cookie'] = setCookies;
   headers['x-content-type-options'] = 'nosniff';
   headers['x-frame-options'] = 'SAMEORIGIN';
-  headers['referrer-policy'] = 'same-origin';
+  headers['referrer-policy'] = headers['referrer-policy'] || 'same-origin';
+  const body = r.status === 304 ? undefined : compress(res, r, headers);
   res.writeHead(r.status, headers);
-  res.end(r.body);
+  res.end(body);
 }

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.30.1 — 26 November 2026
+
+Review before deployment. No new screens; the site is lighter and a little safer.
+
+- **Pages load faster on slow connections.** Pages, styles and scripts are now sent compressed (about one fifth of the size: a typical page goes from 60–240 KB to 10–40 KB).
+- **Styles, scripts and images are kept by the browser** for as long as the version does not change, and are held in the server's memory instead of being read from disk on every request. A new release is picked up at once.
+- The app's offline helper (service worker) is always checked for a newer copy, so updates reach phones sooner.
+- The candidates list makes one database query instead of one per candidate; three indexes added for the calendar and overdue list.
+- The public Apply page now also limits applications per vacancy (60 an hour), because the address a request claims to come from can be faked.
+- The public Apply and assessment pages now really send no referrer, as intended.
+
 ## 1.30.0 — 26 November 2026
 
 Hiring, second round. Six additions for HR.

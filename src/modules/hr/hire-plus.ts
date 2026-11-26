@@ -45,8 +45,8 @@ export function vacancyByToken(app: App, token: string): { req: Requisition; ope
 export interface ApplyInput { fullName?: string; email?: string; phone?: string; currentEmployer?: string; experienceYears?: number | null; currentCtc?: number | null; expectedCtc?: number | null; noticeDays?: number | null; location?: string; heardFrom?: string; consent?: unknown; website?: string; cv?: string; cvName?: string }
 const recent = new Map<string, number[]>();
 /** Five applications an hour from one address is plenty for a person; more looks like a script. */
-function throttle(ip: string, now = Date.now()): void {
-  const hits = (recent.get(ip) || []).filter((t) => now - t < 3_600_000); if (hits.length >= 5) throw new HttpError(429, 'Too many applications from this connection. Please try again in an hour.');
+function throttle(ip: string, max = 5, now = Date.now()): void {
+  const hits = (recent.get(ip) || []).filter((t) => now - t < 3_600_000); if (hits.length >= max) throw new HttpError(429, 'Too many applications from this connection. Please try again in an hour.');
   hits.push(now); recent.set(ip, hits); if (recent.size > 5000) recent.clear();
 }
 export function resetApplyThrottle(): void { recent.clear(); }
@@ -64,7 +64,7 @@ export function applyPublic(app: App, token: string, input: ApplyInput, ip: stri
   if (!buf || !buf.length) throw new HttpError(400, 'Please attach your CV (PDF or Word).');
   if (buf.length > MAX_CV_BYTES) throw new HttpError(413, 'The CV is larger than 5 MB.');
   checkFile(input.cvName || 'cv.pdf', buf.length);
-  throttle(ip);
+  throttle(ip); throttle(`vacancy:${token}`, 60);   // the address a request claims can be faked, so each vacancy also has its own ceiling
   const num = (x: unknown, max: number): number | null => { const n = Number(x); return x === null || x === undefined || x === '' || !Number.isFinite(n) || n < 0 || n > max ? null : n; };
   const at = nowIso(); const norm = normalizeEmail(email);
   const out = app.db.transaction(() => {
