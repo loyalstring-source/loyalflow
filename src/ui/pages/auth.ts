@@ -52,11 +52,12 @@ export function loginPage(o: { csrf: string; error?: string; email?: string; nex
       <script>(function () { var b = document.querySelector('.si-eye'), i = document.getElementById('f-password'); if (!b || !i) return; b.addEventListener('click', function () { var show = i.type === 'password'; i.type = show ? 'text' : 'password'; b.setAttribute('aria-pressed', show ? 'true' : 'false'); b.setAttribute('aria-label', show ? 'Hide password' : 'Show password'); }); })();</script>`) });
 }
 
-export function forgotPage(o: { csrf: string; sent?: boolean; demoLink?: string | null }): Raw {
+export function forgotPage(o: { csrf: string; sent?: boolean; demoLink?: string | null; noMail?: boolean }): Raw {
   return publicPage({ title: 'Reset password', body: shell(html`
     <form class="si-box form" method="post" action="/forgot-password">
       <div><h1>Reset your password</h1><p class="si-lead">We will email a link that works for 60 minutes.</p></div>
-      ${when(o.sent, () => notice('good', html`If that address belongs to an employee, the reset link is on its way.${when(o.demoLink, () => html`<br><span class="small">Demo mode, no mail server: <a href="${o.demoLink}">open the reset link</a>.</span>`)}`))}
+      ${when(o.sent && o.noMail, () => notice('warn', 'Email is not set up on LoyalFlow yet, so no link could be sent. Please ask HR or your administrator for a sign-in link.'))}
+      ${when(o.sent && !o.noMail, () => notice('good', html`If that address belongs to an employee, the reset link is on its way.${when(o.demoLink, () => html`<br><span class="small">Demo mode, no mail server: <a href="${o.demoLink}">open the reset link</a>.</span>`)}`))}
       <input type="hidden" name="_csrf" value="${o.csrf}">
       ${field('Work email', input('email', { type: 'email', required: true, placeholder: 'name@loyalstring.com', autocomplete: 'username' }))}
       <button class="si-btn" type="submit">Send reset link</button>

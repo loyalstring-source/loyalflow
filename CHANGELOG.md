@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.30.2 — 26 November 2026
+
+Sign-in links for new people.
+
+- **"Sign-in link" button on a person's page** (administrators only). It shows a link you can copy or send by WhatsApp; the person opens it, chooses a password and signs in. Works for 24 hours, once. Use it for anyone without a company mailbox, or whenever an email does not arrive.
+- LoyalFlow no longer says a password link "has been emailed" when no mail service is set up. Adding a person, "Reset password" and the "Forgot password" page now say plainly that email is not set up, and the administrator is given the link instead.
+- **Password and sign-in emails now go through Microsoft 365 (the same Entra setup as hiring messages)** once the four GRAPH_ values are on the server. No separate SMTP setup is needed. Only these account emails use it; nothing else starts emailing.
+- The emailed link for a newly added person now lasts 24 hours instead of 60 minutes.
+
 ## 1.30.1 — 26 November 2026
 
 Review before deployment. No new screens; the site is lighter and a little safer.

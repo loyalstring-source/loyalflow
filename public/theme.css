@@ -562,3 +562,4 @@ button.path-step.done:not(:disabled):hover{background:var(--good-ink);color:#FFF
 .apply-brand{display:flex;align-items:center;gap:10px;margin-bottom:20px;font-size:20px}.apply-consent{display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.5;cursor:pointer}.apply-consent input{margin-top:3px;flex:none}
 .cal-ev.mid span.xs,.cal-ev.short span.xs{display:none}.cal-ev.short{flex-direction:row;align-items:center;gap:6px;padding-top:2px;padding-bottom:2px}.cal-ev.short b{flex:0 1 auto}.cal-ev.short span{flex:1 0 auto}
 .cal-person .avatar{flex:none}
+.link-dlg{width:min(520px,calc(100vw - 32px))}.link-dlg p{margin:8px 0 12px}.link-dlg input{width:100%;font-size:13px}

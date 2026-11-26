@@ -167,3 +167,26 @@ describe('compression and caching', () => {
     } finally { await s2.close(); }
   });
 });
+
+describe('sign-in links for new people', () => {
+  test('with no mail service the administrator is given the link instead of being told it was emailed', async () => {
+    const s2 = await startServer();
+    try {
+      const coo = new Client(s2.base); await coo.login(COO); const ic = new Client(s2.base); await ic.login(SUPPORT_IC);
+      const target = s2.app.db.get<{ id: string; email: string }>("SELECT id, email FROM employees WHERE status = 'active' AND is_admin = 0 ORDER BY id DESC LIMIT 1")!;
+      assert.equal((await ic.postJson(`/people/${target.id}/sign-in-link`, {})).status, 403);
+      const res = await coo.postJson(`/people/${target.id}/sign-in-link`, {}); assert.equal(res.status, 200);
+      const url: string = res.json.link.url; assert.match(url, /\/reset-password\?token=[\w-]+$/); assert.equal(res.json.link.valid, '24 hours');
+      const exp = s2.app.db.get<{ expires_at: string }>('SELECT expires_at FROM password_resets WHERE employee_id = ? ORDER BY rowid DESC LIMIT 1', [target.id])!;
+      assert.ok(new Date(exp.expires_at).getTime() - Date.now() > 23 * 3_600_000, 'a hand-delivered link lasts a day');
+      // The link works: the person sets a password and signs in.
+      const anon = new Client(s2.base); const page = await anon.get(new URL(url).pathname + new URL(url).search); const csrf = /name="_csrf" value="([^"]+)"/.exec(await page.text())![1];
+      const set = await anon.postForm('/reset-password', { _csrf: csrf, token: new URL(url).searchParams.get('token')!, password: 'Intern-Pass-2026x', password2: 'Intern-Pass-2026x' }); assert.ok(set.status < 400);
+      const fresh = new Client(s2.base); await fresh.login(target.email, 'Intern-Pass-2026x'); assert.equal((await fresh.get('/people')).status, 200, 'signed in with the new password');
+      // "Reset password" with no mail service also hands over the link rather than claiming an email went out.
+      const reset = await coo.postJson(`/people/${target.id}/reset-password`, {}); assert.equal(reset.status, 200); assert.ok(reset.json.link?.url && /not emailed/.test(reset.json.link.note));
+      const forgot = new Client(s2.base); const fp = await forgot.get('/forgot-password'); const c2 = /name="_csrf" value="([^"]+)"/.exec(await fp.text())![1];
+      const after = await (await forgot.postForm('/forgot-password', { _csrf: c2, email: 'nobody@loyalstring.com' })).text(); assert.ok(/ask HR or your administrator/.test(after) || /open the reset link|on its way/.test(after));
+    } finally { await s2.close(); }
+  });
+});

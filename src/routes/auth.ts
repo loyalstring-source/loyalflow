@@ -1,6 +1,6 @@
 import type { App } from '../app.ts';
 import { Router, htmlResponse, redirect, cookie, json } from '../lib/http.ts';
-import { login, logout, requestPasswordReset, completePasswordReset, setPassword, csrfToken } from '../lib/auth.ts';
+import { login, logout, accountMailChannel, requestPasswordReset, completePasswordReset, setPassword, csrfToken } from '../lib/auth.ts';
 import { randomToken, safeEqual, verifyPassword } from '../lib/crypto.ts';
 import { loginPage, forgotPage, resetPage, changePasswordPage, ratePage } from '../ui/pages/auth.ts';
 import { publicPage } from '../ui/layout.ts';
@@ -61,7 +61,7 @@ export function registerPublic(r: Router<Employee>, app: App): void {
     if (!(str(body, '_csrf') && safeEqual(str(body, '_csrf'), csrf))) return htmlResponse(forgotPage({ csrf }), 400);
     const { token } = requestPasswordReset(app, str(body, 'email'));
     const demoLink = app.cfg.demo && app.mailer.transport === 'console' && token ? `/reset-password?token=${token}` : null;
-    return htmlResponse(forgotPage({ csrf, sent: true, demoLink }));
+    return htmlResponse(forgotPage({ csrf, sent: true, demoLink, noMail: accountMailChannel(app) === 'none' && !app.cfg.demo }));
   });
 
   r.get('/reset-password', (ctx) => htmlResponse(resetPage({ csrf: loginCsrf(ctx, app), token: ctx.query.get('token') || '' })));

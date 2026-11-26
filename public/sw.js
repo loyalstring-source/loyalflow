@@ -1,5 +1,5 @@
 /* LoyalFlow service worker: network first, with a small offline fallback for the app shell. */
-var CACHE = 'loyalflow-v7';
+var CACHE = 'loyalflow-v8';
 var SHELL = ['/static/app.css', '/static/theme.css', '/static/app.js', '/static/icon.svg', '/offline'];
 self.addEventListener('install', function (e) { e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL).catch(function () {}); }).then(function () { return self.skipWaiting(); })); });
 self.addEventListener('activate', function (e) { e.waitUntil(caches.keys().then(function (keys) { return Promise.all(keys.filter(function (k) { return k !== CACHE; }).map(function (k) { return caches.delete(k); })); }).then(function () { return self.clients.claim(); })); });

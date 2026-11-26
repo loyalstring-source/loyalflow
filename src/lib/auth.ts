@@ -67,16 +67,31 @@ export function setPassword(app: App, employeeId: string, password: string, acto
   return null;
 }
 
-/** Create a reset token (valid 60 minutes) and send it by email. Always returns silently so emails cannot be enumerated. */
-export function requestPasswordReset(app: App, email: string): { token: string | null } {
+/** How account emails (password and sign-in links) leave: SMTP if set up, else Microsoft 365 (Graph) if set up, else not at all. */
+export function accountMailChannel(app: App): 'smtp' | 'graph' | 'none' {
+  return app.mailer.transport === 'smtp' ? 'smtp' : app.graph.configured ? 'graph' : 'none';
+}
+
+/**
+ * Create a link for setting a password and email it when email is set up. Valid for 60 minutes, or longer when an
+ * administrator asks for a link to hand over personally. Always returns silently for an unknown address, so emails cannot be enumerated.
+ * `emailed` says whether a message was handed to a mail service; with no mail service the caller must pass the link on itself.
+ */
+export function requestPasswordReset(app: App, email: string, opts: { hours?: number; send?: boolean } = {}): { token: string | null; link: string | null; emailed: boolean } {
   const user = getEmployeeByEmail(app.db, email);
-  if (!user || user.status !== 'active') return { token: null };
-  const token = randomToken(24);
-  app.db.run('INSERT INTO password_resets (token_hash, employee_id, expires_at) VALUES (?, ?, ?)', [sha256(token), user.id, new Date(Date.now() + 60 * 60_000).toISOString()]);
+  if (!user || user.status !== 'active') return { token: null, link: null, emailed: false };
+  const token = randomToken(24); const hours = opts.hours || 1;
+  app.db.run('INSERT INTO password_resets (token_hash, employee_id, expires_at) VALUES (?, ?, ?)', [sha256(token), user.id, new Date(Date.now() + hours * 3_600_000).toISOString()]);
   const link = `${app.cfg.baseUrl}/reset-password?token=${token}`;
-  void app.mailer.send({ to: user.email, subject: 'Set your LoyalFlow password', text: `Hello ${user.full_name},\n\nUse this link within 60 minutes to set your password:\n${link}\n\nIf you did not ask for this, ignore this email.` });
+  const channel = opts.send === false ? 'none' : accountMailChannel(app);
+  const subject = 'Set your LoyalFlow password'; const validFor = hours === 1 ? '60 minutes' : `${hours} hours`;
+  const text = `Hello ${user.full_name},\n\nUse this link within ${validFor} to set your password:\n${link}\n\nIf you did not ask for this, ignore this email.`;
+  if (channel === 'smtp') void app.mailer.send({ to: user.email, subject, text });
+  else if (channel === 'graph') void app.graph.send({ to: user.email, subject, html: `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5"><p>Hello ${user.full_name.replace(/[<>&]/g, '')},</p><p>Use this link within ${validFor} to set your LoyalFlow password:</p><p><a href="${link}">${link}</a></p><p style="color:#666">If you did not ask for this, ignore this email.</p></div>` })
+    .then((r) => { if (r.state !== 'accepted') console.error(`[mail:graph] password link not sent: ${r.detail}`); }).catch((e) => console.error('[mail:graph] failed', (e as Error).message));
+  else if (opts.send !== false) void app.mailer.send({ to: user.email, subject, text });   // console transport: written to the log only
   audit(app.db, { entity: 'employee', entityId: user.id, action: 'password.reset_requested' });
-  return { token };
+  return { token, link, emailed: channel !== 'none' };
 }
 
 export function completePasswordReset(app: App, token: string, password: string): string | null {

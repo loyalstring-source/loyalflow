@@ -53,6 +53,26 @@
     }).then(function (r) { return r.json().catch(function () { return { ok: false, error: 'Unexpected response (' + r.status + ')' }; }).then(function (j) { if (!r.ok && !j.error) j.error = 'Request failed (' + r.status + ')'; return j; }); })
       .catch(function (e) { return { ok: false, error: 'Network problem: ' + (e && e.message || e) }; });
   }
+  // A link the administrator passes on personally: shown in a dialog with Copy and WhatsApp, never in a toast that disappears.
+  function showLink(l) {
+    var d = document.createElement('dialog'); d.className = 'board-dlg link-dlg';
+    var h = document.createElement('h2'); h.textContent = 'Sign-in link for ' + l.name; d.appendChild(h);
+    var p = document.createElement('p'); p.className = 'small muted'; p.textContent = l.note + ' The link works once, for ' + l.valid + '.'; d.appendChild(p);
+    var inp = document.createElement('input'); inp.readOnly = true; inp.value = l.url; inp.className = 'input'; inp.setAttribute('aria-label', 'Sign-in link'); inp.addEventListener('focus', function () { inp.select(); }); d.appendChild(inp);
+    var row = document.createElement('div'); row.className = 'row right'; row.style.gap = '8px'; row.style.marginTop = '14px';
+    var copy = document.createElement('button'); copy.type = 'button'; copy.className = 'btn btn-primary'; copy.textContent = 'Copy link';
+    copy.addEventListener('click', function () {
+      var ok = function () { copy.textContent = 'Copied'; }; inp.select();
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(l.url).then(ok, function () { try { document.execCommand('copy'); ok(); } catch (x) { /* the link is selected; Ctrl+C works */ } });
+      else { try { document.execCommand('copy'); ok(); } catch (x) { /* selected for manual copy */ } }
+    });
+    var wa = document.createElement('a'); wa.className = 'btn'; wa.target = '_blank'; wa.rel = 'noopener'; wa.textContent = 'WhatsApp';
+    var digits = String(l.mobile || '').replace(/\D/g, ''); if (digits.length === 10) digits = '91' + digits;
+    wa.href = 'https://wa.me/' + (digits.length >= 11 ? digits : '') + '?text=' + encodeURIComponent('Hello ' + l.name + ', this is your LoyalFlow sign-in link. Open it and choose a password (works for ' + l.valid + '): ' + l.url);
+    var close = document.createElement('button'); close.type = 'button'; close.className = 'btn btn-ghost'; close.textContent = 'Close'; close.addEventListener('click', function () { d.close(); });
+    row.appendChild(close); row.appendChild(wa); row.appendChild(copy); d.appendChild(row);
+    d.addEventListener('close', function () { d.remove(); }); document.body.appendChild(d); d.showModal(); inp.focus();
+  }
   function handle(res, origin) {
     if (!res) return;
     if (res.error && !res.ok) { toast({ kind: 'critical', title: 'That did not work', body: res.error }); return; }
@@ -60,6 +80,7 @@
     if (res.close) closeDrawer();
     if (res.redirect) { setFlash({ toast: res.toast, confetti: res.confetti }); window.location.href = res.redirect; return; }
     if (res.reload) { setFlash({ toast: res.toast, confetti: res.confetti }); window.location.reload(); return; }
+    if (res.link) showLink(res.link);
     if (res.toast) toast(res.toast);
     if (res.confetti) confetti();
     if (res.drawer) openDrawerHtml(res.drawer);

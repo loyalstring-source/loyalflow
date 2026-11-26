@@ -1,5 +1,5 @@
 import type { App } from '../app.ts';
-import { Router, htmlResponse, HttpError } from '../lib/http.ts';
+import { Router, htmlResponse, json, HttpError } from '../lib/http.ts';
 import { type Employee, listEmployees, getEmployee, getEmployeeByEmail, listDepartments, getDepartment, listSites, directReports, validateReportingLine } from '../modules/people/model.ts';
 import { tilesFor } from '../modules/kpi/engine.ts';
 import { personKpis } from '../modules/kpi/views.ts';
@@ -87,8 +87,8 @@ export function register(r: Router<Employee>, app: App): void {
     app.db.run('INSERT INTO employees (id, full_name, email, password_hash, must_change_password, designation, department_id, sub_team, site_id, functional_role, reporting_manager_id, secondary_manager_id, shift_code, join_date, employment_type, status, lang, is_admin, mobile, pagarguru_code, failed_logins, created_at, updated_at) VALUES (?, ?, ?, NULL, 1, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?)',
       [id, fields.full_name, fields.email, fields.designation, fields.department_id, fields.sub_team, fields.site_id, fields.functional_role, fields.reporting_manager_id, fields.shift_code, fields.join_date, 'full_time', fields.status, fields.lang, fields.mobile, '', nowIso, nowIso]);
     audit(app.db, { entity: 'employee', entityId: id, action: 'create', actorId: me.id, after: fields });
-    const { token } = requestPasswordReset(app, email);
-    return done(ctx, { reload: true, toast: { title: `${fields.full_name} added as ${id}`, body: token ? 'A password link has been emailed.' : 'Set a password from their profile.', kind: 'success' } });
+    const sent = requestPasswordReset(app, email, { hours: 24 });
+    return done(ctx, { redirect: `/people/${id}`, toast: { title: `${fields.full_name} added as ${id}`, body: sent.emailed ? `A link to set a password has been emailed to ${email}. It works for 24 hours.` : 'Email is not set up, so no link was sent. Press “Sign-in link” on this page and pass the link on yourself.', kind: sent.emailed ? 'success' : 'warn' } });
   };
   r.post('/people', (ctx) => saveEmployee(ctx, null));
   r.post('/people/:id', (ctx) => { const e = getEmployee(app.db, ctx.params.id); if (!e) return fail(ctx, 404, 'Not found'); return saveEmployee(ctx, e); });
@@ -96,10 +96,22 @@ export function register(r: Router<Employee>, app: App): void {
   r.post('/people/:id/reset-password', (ctx) => {
     const me = user(ctx); requireCan(app.db, me, 'people.admin');
     const e = getEmployee(app.db, ctx.params.id); if (!e) return fail(ctx, 404, 'Not found');
+    if (e.status !== 'active') return fail(ctx, 400, `${e.full_name} is not active, so cannot sign in.`);
     logoutEverywhere(app, e.id);
-    const { token } = requestPasswordReset(app, e.email);
+    const sent = requestPasswordReset(app, e.email);
     audit(app.db, { entity: 'employee', entityId: e.id, action: 'password.reset_by_admin', actorId: me.id });
-    return done(ctx, { toast: { title: 'Reset link sent', body: app.cfg.demo && app.mailer.transport === 'console' && token ? `Demo mode: /reset-password?token=${token}` : `${e.email} has 60 minutes to use it.`, kind: 'success', } });
+    // With no mail service nothing can be emailed: say so, and hand the link to the administrator instead of claiming it was sent.
+    if (!sent.emailed) return json({ ok: true, link: { url: sent.link, name: e.full_name, mobile: e.mobile || '', valid: '60 minutes', note: 'Email is not set up on this server, so the link was not emailed. Pass it on yourself.' } });
+    return done(ctx, { toast: { title: 'Reset link emailed', body: `${e.email} has 60 minutes to use it. If it does not arrive, use “Sign-in link”.`, kind: 'success' } });
+  });
+  // A link the administrator hands over personally (Teams, WhatsApp): for people with no company mailbox, or when email is not working.
+  r.post('/people/:id/sign-in-link', (ctx) => {
+    const me = user(ctx); requireCan(app.db, me, 'people.admin');
+    const e = getEmployee(app.db, ctx.params.id); if (!e) return fail(ctx, 404, 'Not found');
+    if (e.status !== 'active') return fail(ctx, 400, `${e.full_name} is not active, so cannot sign in.`);
+    const sent = requestPasswordReset(app, e.email, { hours: 24, send: false });
+    audit(app.db, { entity: 'employee', entityId: e.id, action: 'password.link_by_admin', actorId: me.id });
+    return json({ ok: true, link: { url: sent.link, name: e.full_name, mobile: e.mobile || '', valid: '24 hours', note: `${e.full_name} opens this link, chooses a password, and then signs in with ${e.email}.` } });
   });
 }
 
