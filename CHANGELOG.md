@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.30.3 — 26 November 2026
+
+- **"Set password" on a person's page** (administrators only). Gives the person a temporary password, with a suggestion already filled in. They sign in with it and must choose their own straight away, so nobody else knows the password they use. Their other sign-ins are ended and the action is in the audit log. It cannot be used on your own account or on another administrator's.
+
 ## 1.30.2 — 26 November 2026
 
 Sign-in links for new people.

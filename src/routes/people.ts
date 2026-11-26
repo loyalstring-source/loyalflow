@@ -7,12 +7,13 @@ import { compliance } from '../modules/sops/service.ts';
 import { listTickets } from '../modules/desk/service.ts';
 import { listDeals } from '../modules/sales/service.ts';
 import { listTasks } from '../modules/tasks/service.ts';
-import { requestPasswordReset, logoutEverywhere } from '../lib/auth.ts';
+import { requestPasswordReset, logoutEverywhere, setTemporaryPassword } from '../lib/auth.ts';
+import { randomInt } from 'node:crypto';
 import { audit } from '../lib/audit.ts';
 import { can, requireCan, scopeFor } from '../lib/scope.ts';
 import { getSetting } from '../lib/settings.ts';
 import { localDateString, addDays } from '../lib/time.ts';
-import { peoplePage, profilePage, employeeModal, type PeopleData, type ProfileData, type TreeNode } from '../ui/pages/people.ts';
+import { peoplePage, profilePage, employeeModal, setPasswordModal, type PeopleData, type ProfileData, type TreeNode } from '../ui/pages/people.ts';
 import { done, fail, view, user, str } from './helpers.ts';
 
 function buildTree(all: Employee[], rootId: string): TreeNode | null {
@@ -103,6 +104,22 @@ export function register(r: Router<Employee>, app: App): void {
     // With no mail service nothing can be emailed: say so, and hand the link to the administrator instead of claiming it was sent.
     if (!sent.emailed) return json({ ok: true, link: { url: sent.link, name: e.full_name, mobile: e.mobile || '', valid: '60 minutes', note: 'Email is not set up on this server, so the link was not emailed. Pass it on yourself.' } });
     return done(ctx, { toast: { title: 'Reset link emailed', body: `${e.email} has 60 minutes to use it. If it does not arrive, use “Sign-in link”.`, kind: 'success' } });
+  });
+  // A temporary password set by an administrator, for people who cannot receive email. They must change it at first sign-in.
+  const canSetFor = (me: Employee, e: Employee): string | null => e.id === me.id ? 'Use “Change password” for your own account.' : e.is_admin ? 'An administrator’s password cannot be set by someone else. Use “Sign-in link” instead.' : e.status !== 'active' ? `${e.full_name} is not active, so cannot sign in.` : null;
+  r.get('/people/:id/set-password', (ctx) => {
+    const v = view(ctx); requireCan(app.db, v.user, 'people.admin'); const e = getEmployee(app.db, ctx.params.id); if (!e) throw new HttpError(404, 'Not found');
+    const no = canSetFor(v.user, e); if (no) throw new HttpError(400, no);
+    // A suggestion that is easy to read out and meets the password rules; the administrator may type another.
+    const words = ['Sparkle', 'Bright', 'Silver', 'Golden', 'Mango', 'Orbit']; const suggestion = `${words[randomInt(words.length)]}@${randomInt(9000) + 1000}${'abcdefghjkmnpqrstuvwxyz'[randomInt(23)]}${'ABCDEFGHJKLMNPQRSTUVWXYZ'[randomInt(24)]}`;
+    return htmlResponse(setPasswordModal(e, suggestion));
+  });
+  r.post('/people/:id/set-password', async (ctx) => {
+    const me = user(ctx); requireCan(app.db, me, 'people.admin'); const e = getEmployee(app.db, ctx.params.id); if (!e) return fail(ctx, 404, 'Not found');
+    const no = canSetFor(me, e); if (no) return fail(ctx, 400, no);
+    const b = await ctx.body() as Record<string, unknown>; const problem = setTemporaryPassword(app, e.id, str(b, 'password'), me.id);
+    if (problem) return fail(ctx, 400, problem);
+    return done(ctx, { reload: true, toast: { title: `Temporary password set for ${e.full_name}`, body: `Tell them the password yourself. They sign in with ${e.email} and will be asked to choose their own.`, kind: 'success' } });
   });
   // A link the administrator hands over personally (Teams, WhatsApp): for people with no company mailbox, or when email is not working.
   r.post('/people/:id/sign-in-link', (ctx) => {

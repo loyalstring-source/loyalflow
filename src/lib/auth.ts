@@ -57,6 +57,19 @@ export function logoutEverywhere(app: App, employeeId: string): void {
   app.db.run('DELETE FROM sessions WHERE employee_id = ?', [employeeId]);
 }
 
+/**
+ * An administrator gives a person a temporary password (told to them directly). The person must choose their own at the next sign-in,
+ * so the administrator never knows the password in use. Other sign-ins of that person are ended.
+ */
+export function setTemporaryPassword(app: App, employeeId: string, password: string, actorId: string): string | null {
+  const problem = passwordProblems(password);
+  if (problem) return problem;
+  app.db.run('UPDATE employees SET password_hash = ?, must_change_password = 1, failed_logins = 0, locked_until = NULL, updated_at = ? WHERE id = ?', [hashPassword(password), new Date().toISOString(), employeeId]);
+  app.db.run('DELETE FROM sessions WHERE employee_id = ?', [employeeId]);
+  audit(app.db, { entity: 'employee', entityId: employeeId, action: 'password.temporary_set_by_admin', actorId });
+  return null;
+}
+
 export function setPassword(app: App, employeeId: string, password: string, actorId: string | null): string | null {
   const problem = passwordProblems(password);
   if (problem) return problem;

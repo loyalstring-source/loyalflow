@@ -1,6 +1,6 @@
 import { html, when, type Raw } from '../../lib/html.ts';
 import { page, modal, type View } from '../layout.ts';
-import { icon, pill, avatar, empty, field, input, select, button, table, tileCard, statCard, bar } from '../components.ts';
+import { icon, pill, avatar, empty, field, input, select, button, table, tileCard, statCard, bar, notice } from '../components.ts';
 import type { Employee, Department, Site } from '../../modules/people/model.ts';
 import type { Tile } from '../../modules/kpi/engine.ts';
 import { fmtDate, fmtTime, fmtDateFull } from '../../lib/time.ts';
@@ -41,7 +41,7 @@ export function profilePage(v: View, d: ProfileData): Raw {
   const e = d.e;
   return page(v, {
     title: e.full_name, docTitle: e.full_name, subtitle: html`${e.designation} · ${d.dept?.name || e.department_id}${when(e.sub_team, () => html` · ${e.sub_team}`)} · ${d.site?.name || ''}`,
-    actions: html`${when(d.self, button('Change password', { href: '/change-password', icon: 'settings' }))}${when(d.canAdmin, () => html`${button('Edit', { modal: `/people/${e.id}/edit`, icon: 'edit' })}${button('Reset password', { post: `/people/${e.id}/reset-password`, confirm: `Email ${e.full_name} a password reset link and sign them out everywhere?`, icon: 'mail' })}${button('Sign-in link', { post: `/people/${e.id}/sign-in-link` })}`)}`,
+    actions: html`${when(d.self, button('Change password', { href: '/change-password', icon: 'settings' }))}${when(d.canAdmin, () => html`${button('Edit', { modal: `/people/${e.id}/edit`, icon: 'edit' })}${button('Reset password', { post: `/people/${e.id}/reset-password`, confirm: `Email ${e.full_name} a password reset link and sign them out everywhere?`, icon: 'mail' })}${button('Sign-in link', { post: `/people/${e.id}/sign-in-link` })}${when(!d.self && !e.is_admin && e.status === 'active', () => button('Set password', { modal: `/people/${e.id}/set-password` }))}`)}`,
     body: html`
       <div class="cols"><div class="col-main">
         <section class="card"><div class="grid grid-4">${statCard({ href: blockedModule(v.app.db, v.user, '/desk') ? undefined : `/desk?q=${encodeURIComponent(e.full_name.split(' ')[0])}`, value: d.openWork.tickets, label: 'Open tickets', tone: 'accent' })}${statCard({ href: blockedModule(v.app.db, v.user, '/pipeline') ? undefined : `/pipeline?owner=${e.id}`, value: d.openWork.deals, label: 'Open deals', tone: 'accent' })}${statCard({ value: d.openWork.orders, label: 'Work orders', tone: 'neutral' })}${statCard({ value: d.openWork.tasks, label: 'Open tasks', tone: d.openWork.tasks ? 'warn' : 'neutral' })}</div></section>
@@ -72,3 +72,15 @@ export function employeeModal(v: View, o: { e: Employee | null; departments: Dep
 }
 
 export { empty };
+
+export function setPasswordModal(e: Employee, suggestion: string): Raw {
+  return modal({
+    title: `Set a password for ${e.full_name}`,
+    body: html`<form data-post="/people/${e.id}/set-password" class="stack">
+      ${notice('accent', html`This is a <b>temporary</b> password. ${e.full_name.split(' ')[0]} signs in with <b>${e.email}</b> and this password, and is then asked to choose their own. Tell it to them yourself (in person, by phone or Teams), not in a group.`)}
+      ${field('Temporary password', input('password', { value: suggestion, required: true, autocomplete: 'off' }), 'At least 10 characters, with a letter and a number. You can type your own.')}
+      <p class="xs muted">If they were signed in anywhere, they are signed out. This is written to the audit log.</p>
+      <div class="row right">${button('Cancel', { kind: 'ghost', cls: 'js-close-modal' })}${button('Set password', { type: 'submit', kind: 'primary' })}</div>
+    </form>`
+  });
+}

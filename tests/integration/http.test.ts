@@ -190,3 +190,23 @@ describe('sign-in links for new people', () => {
     } finally { await s2.close(); }
   });
 });
+
+describe('temporary password set by an administrator', () => {
+  test('the person signs in with it, must choose their own, and administrators are protected', async () => {
+    const s2 = await startServer();
+    try {
+      const coo = new Client(s2.base); await coo.login(COO); const ic = new Client(s2.base); await ic.login(SUPPORT_IC);
+      const target = s2.app.db.get<{ id: string; email: string }>("SELECT id, email FROM employees WHERE status = 'active' AND is_admin = 0 AND email <> ? ORDER BY id DESC LIMIT 1", [SUPPORT_IC])!;
+      const cooRow = s2.app.db.get<{ id: string }>('SELECT id FROM employees WHERE email = ?', [COO])!; const other = s2.app.db.get<{ id: string }>('SELECT id FROM employees WHERE is_admin = 1 AND id <> ? LIMIT 1', [cooRow.id])!;
+      assert.equal((await ic.postJson(`/people/${target.id}/set-password`, { password: 'Mango@4821kQ' })).status, 403, 'only administrators');
+      const modal = await (await coo.get(`/people/${target.id}/set-password`)).text(); const suggested = /name="password"[^>]*value="([^"]+)"/.exec(modal)![1]; assert.ok(suggested.length >= 10);
+      assert.equal((await coo.postJson(`/people/${target.id}/set-password`, { password: 'short1' })).status, 400);
+      assert.equal((await coo.postJson(`/people/${cooRow.id}/set-password`, { password: 'Mango@4821kQ' })).status, 400, 'not your own');
+      assert.equal((await coo.postJson(`/people/${other.id}/set-password`, { password: 'Mango@4821kQ' })).status, 400, 'not another administrator');
+      assert.equal((await coo.postJson(`/people/${target.id}/set-password`, { password: suggested })).status, 200);
+      assert.equal(s2.app.db.get<{ m: number }>('SELECT must_change_password AS m FROM employees WHERE id = ?', [target.id])!.m, 1);
+      const person = new Client(s2.base); await person.login(target.email, suggested);
+      const land = await person.get('/today'); assert.ok(land.status >= 300 && land.status < 400 && /change-password/.test(land.headers.get('location') || ''), 'they are sent to choose their own password');
+    } finally { await s2.close(); }
+  });
+});
